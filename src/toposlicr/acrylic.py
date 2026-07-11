@@ -74,10 +74,27 @@ def apply_acrylic(parts: list[Part], model: LayerModel, symbology: SymbologyResu
             # Cut the lake out of every ply sub-part on this layer it touches.
             cut_any = False
             for part in result:
-                if (part.kind == "ply" and part.layer_index == k
+                if not (part.kind == "ply" and part.layer_index == k
                         and part.outline.intersects(lake)):
-                    part.outline = _mp(part.outline.difference(lake))
-                    cut_any = True
+                    continue
+                new_outline = _mp(part.outline.difference(lake))
+                if new_outline.is_empty:
+                    # The lake fully covers this piece — skip rather than delete
+                    # the part (an empty outline crashes downstream nesting).
+                    warnings.append(
+                        f"lake on layer {k} fully covers ply part {part.part_id}; "
+                        "skipping this cut")
+                    continue
+                part.outline = new_outline
+                # Re-clip the part's scores/engraving to the new outline so no
+                # symbology floats over the now-missing (lake) material.
+                for role, geom in list(part.ops.items()):
+                    clipped = geom.difference(lake)
+                    if clipped.is_empty:
+                        del part.ops[role]
+                    else:
+                        part.ops[role] = clipped
+                cut_any = True
             if not cut_any:
                 warnings.append(
                     f"no ply part found on layer {k} to host a lake inset")

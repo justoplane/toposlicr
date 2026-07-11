@@ -47,7 +47,7 @@ def add_part_id_score(part: Part, cfg: Config) -> None:
 
     glyphs = text_to_polygons(part.part_id, font=cfg.symbology.labels.font,
                               cap_height_mm=PART_ID_CAP_MM)
-    if glyphs.is_empty:
+    if glyphs.is_empty or part.outline.is_empty:
         return
     point = part.outline.representative_point()
     minx, miny, maxx, maxy = glyphs.bounds
@@ -59,6 +59,10 @@ def nest_parts(parts: list[Part], cfg: Config) -> list[Board]:
     """Group parts by material and bin-pack each group onto its own boards."""
     usable_w, usable_h = cfg.machine.usable_bed_mm
     spacing = _spacing(cfg)
+
+    # Drop any degenerate empty-outline parts (e.g. a ply piece a lake fully
+    # covered) — they have NaN bounds and would break packing/validation.
+    parts = [p for p in parts if not p.outline.is_empty]
 
     # Score every part's ID first, so it is part of the piece being placed.
     for part in parts:
@@ -85,8 +89,9 @@ def _guard_fits_bed(parts: list[Part], usable_w: float, usable_h: float,
         if w > usable_w + 1e-9 or h > usable_h + 1e-9:
             raise ValueError(
                 f"part {part.part_id} ({w:.1f}×{h:.1f} mm) exceeds the usable bed "
-                f"({usable_w:.1f}×{usable_h:.1f} mm) for material '{material}'; "
-                "panelize oversized layers before nesting."
+                f"({usable_w:.1f}×{usable_h:.1f} mm) for material '{material}'. "
+                "Panelization could not split it small enough — increase the bed "
+                "size, reduce the model width, or check for a pathological outline."
             )
 
 

@@ -24,9 +24,13 @@ from .svg import SvgDocument
 def offset_series(start: float = -0.05, stop: float = 0.15,
                   step: float = 0.02) -> list[float]:
     """Inclusive series of press-fit offsets in mm."""
-    # Integer stepping avoids float drift.
-    n = round((stop - start) / step)
-    return [round(start + i * step, 3) for i in range(n + 1)]
+    # Integer stepping avoids float drift; clamp so no value exceeds `stop` when
+    # the step does not divide the range evenly.
+    if step <= 0:
+        raise ValueError("step must be positive")
+    n = int((stop - start) / step + 1e-9)
+    vals = [round(start + i * step, 3) for i in range(n + 1)]
+    return [v for v in vals if v <= stop + 1e-9]
 
 
 def build_coupon(cfg: Config, *, offsets: list[float] | None = None,

@@ -121,11 +121,14 @@ def _run_layout(model, symbology, cfg, out: Path, log: Logger, warnings: list[st
     """Parts → acrylic → panelization → nesting → boards + guide."""
     log("[5/6] building parts (acrylic insets + panelization) …")
     parts = build_parts_from_model(model, symbology, cfg)
-    if panelize:
-        parts = panelize_parts(parts, model, cfg)
+    # Acrylic runs BEFORE panelization so lake holes are cut into whole layers
+    # and the emitted acrylic parts are themselves panelized if oversized —
+    # otherwise a lake wider than the bed would reach nesting unsplit and abort.
     if symbology is not None:
         parts, acr_warnings = apply_acrylic(parts, model, symbology, cfg)
         warnings.extend(acr_warnings)
+    if panelize:
+        parts = panelize_parts(parts, model, cfg)
     log(f"      {len(parts)} parts "
         f"({sum(1 for p in parts if p.kind == 'acrylic')} acrylic)")
 
@@ -148,7 +151,6 @@ def _run_symbology(model, cfg, bbox, out: Path, log: Logger, use_cache: bool,
     Network/parse failures degrade gracefully: the run continues terrain-only
     with a warning, matching the 'proceed without stopping' design.
     """
-    log("[3/4] fetching OSM features + building symbology …")
     try:
         raw = fetch_features(bbox, cache_dir=out.parent / "cache" / "features",
                              use_cache=use_cache)

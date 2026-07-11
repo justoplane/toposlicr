@@ -39,6 +39,8 @@ def text_to_polygons(text: str, *, font: str = "DejaVu Sans",
     """
     if not text.strip():
         return MultiPolygon()
+    # Cache the glyphs at unit cap-height (keyed on font+text only) and scale per
+    # call, so the same text requested at different cap heights isn't mis-sized.
     key = (font, text)
     if key not in _glyph_cache:
         from matplotlib.font_manager import FontProperties
@@ -49,11 +51,14 @@ def text_to_polygons(text: str, *, font: str = "DejaVu Sans",
         cap = TextPath((0, 0), "H", size=1.0, prop=fp).get_extents().height or 0.7
         geom = _path_to_polygons(tp)
         if not geom.is_empty:
-            geom = _scale(geom, cap_height_mm / cap, cap_height_mm / cap, origin=(0, 0))
-            minx, miny, maxx, maxy = geom.bounds
+            geom = _scale(geom, 1.0 / cap, 1.0 / cap, origin=(0, 0))  # cap height = 1
+            minx, _, maxx, _ = geom.bounds
             geom = _translate(geom, -(minx + maxx) / 2.0, 0)  # center on x=0
         _glyph_cache[key] = geom
-    return _glyph_cache[key]
+    unit = _glyph_cache[key]
+    if unit.is_empty:
+        return unit
+    return _scale(unit, cap_height_mm, cap_height_mm, origin=(0, 0))
 
 
 @dataclass
@@ -208,8 +213,10 @@ def write_labels_file(report: LabelReport, path) -> None:
     rows = []
     for p in report.placed:
         if not p.geometry.is_empty:
-            cx = p.geometry.centroid.x
-            cy = p.geometry.centroid.y
+            # Record the glyph bbox center — that is what _place_forced/_place_one
+            # position, so an unedited save→reload is a no-op (no drift).
+            minx, miny, maxx, maxy = p.geometry.bounds
+            cx, cy = (minx + maxx) / 2.0, (miny + maxy) / 2.0
         else:
             cx, cy = p.anchor.x, p.anchor.y
         rows.append({

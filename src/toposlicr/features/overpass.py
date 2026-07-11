@@ -23,6 +23,22 @@ _OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 # Overpass rejects the default python-requests UA with 406; identify ourselves.
 _USER_AGENT = "toposlicr/0.1 (laser-cut topo map pipeline)"
 
+
+class OverpassError(RuntimeError):
+    """Overpass returned an error (e.g. a timeout/rate-limit ``remark``)."""
+
+
+def check_overpass_error(payload: dict) -> None:
+    """Raise if an Overpass JSON payload signals a runtime error.
+
+    Overpass answers timeouts and rate-limits with HTTP 200 and a ``remark``
+    field alongside an empty ``elements`` list, so it must be detected before the
+    response is cached or treated as 'no features'.
+    """
+    remark = payload.get("remark")
+    if remark and not payload.get("elements"):
+        raise OverpassError(remark.strip())
+
 # Pseudo stream-order for OSM waterway classes, so `min_stream_order` filtering
 # works globally even without NHD's real stream order.
 _WATERWAY_ORDER = {"river": 5, "canal": 4, "stream": 2, "tidal_channel": 3}
@@ -71,7 +87,9 @@ class OverpassFeatureProvider:
         resp = self._session.post(self._url, data={"data": _query(bbox)},
                                   timeout=self._timeout)
         resp.raise_for_status()
-        return parse_overpass_json(resp.json())
+        payload = resp.json()
+        check_overpass_error(payload)
+        return parse_overpass_json(payload)
 
 
 def parse_overpass_json(payload: dict) -> FeatureCollection:

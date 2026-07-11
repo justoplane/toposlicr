@@ -245,15 +245,39 @@ def _parse_contour(raw: dict[str, Any], warnings: list[str]) -> ContourConfig:
     return cc
 
 
+def _coerce(val: Any, type_str: str) -> Any:
+    """Coerce a raw TOML value to a field's declared scalar type.
+
+    Field annotations are strings (``from __future__ import annotations``); we
+    key off the substring so ``float``, ``int``, ``bool`` and ``float | None``
+    all work. ``None`` passes through for optional fields.
+    """
+    if val is None:
+        return None
+    try:
+        if "bool" in type_str:
+            return bool(val)
+        if "int" in type_str and "float" not in type_str:
+            return int(val)
+        if "float" in type_str:
+            return float(val)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"cannot coerce {val!r} to {type_str}: {exc}") from exc
+    return val
+
+
 def _fill_dataclass(obj: Any, raw: dict[str, Any], where: str,
                     warnings: list[str]) -> None:
-    """Set known dataclass fields from a raw table; warn on unknown keys."""
+    """Set known dataclass fields from a raw table, coercing scalar types."""
     from dataclasses import fields as dc_fields
 
-    known = {f.name: f.type for f in dc_fields(obj)}
+    known = {f.name: str(f.type) for f in dc_fields(obj)}
     for key, val in raw.items():
         if key in known:
-            setattr(obj, key, val)
+            try:
+                setattr(obj, key, _coerce(val, known[key]))
+            except ConfigError as exc:
+                raise ConfigError(f"[{where}] key '{key}': {exc}") from exc
         else:
             warnings.append(f"[{where}] unknown key '{key}' ignored")
 

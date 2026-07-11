@@ -23,11 +23,30 @@ from .dem.base import DemRaster
 
 def smooth_dem(data: np.ndarray, sigma_px: float) -> np.ndarray:
     """Gaussian pre-smoothing. Smoothing the raster (not the vectors afterwards)
-    yields far more organic contour curves (plan Section 3.1)."""
+    yields far more organic contour curves (plan Section 3.1).
+
+    NaN nodata cells (e.g. the corner triangles a UTM reprojection leaves, or
+    source voids/ocean) are preserved through smoothing via a *normalized*
+    convolution: filling them with a constant before blurring would bleed that
+    value into the terrain and make ``contourpy`` treat them as real ground —
+    contaminating the base-layer footprint with the full raster rectangle.
+    """
+    arr = data.astype("float64")
     if sigma_px <= 0:
-        return data.astype("float64")
-    filled = np.nan_to_num(data.astype("float64"), nan=np.nanmin(data))
-    return gaussian_filter(filled, sigma=sigma_px)
+        return arr  # NaN passes through; contourpy masks nodata cells.
+    mask = np.isnan(arr)
+    if not mask.any():
+        return gaussian_filter(arr, sigma=sigma_px)
+    # Normalized convolution: blur values and a validity weight, then divide,
+    # so nodata neither bleeds in nor drags edges toward a fill constant.
+    filled = np.where(mask, 0.0, arr)
+    weight = (~mask).astype("float64")
+    smoothed = gaussian_filter(filled, sigma=sigma_px)
+    norm = gaussian_filter(weight, sigma=sigma_px)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = smoothed / norm
+    out[mask] = np.nan            # restore nodata so contourpy keeps masking it
+    return out
 
 
 def _filled_to_polygons(cg, lower: float, upper: float) -> list[Polygon]:

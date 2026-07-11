@@ -113,8 +113,11 @@ def _layer_count(base_elev_m: float, max_elev_m: float, interval_m: float) -> in
     span = max_elev_m - base_elev_m
     if span <= 0:
         raise ValueError("max_elev_m must be greater than base_elev_m")
-    # Number of stacked bands whose thresholds fit within the span.
-    return max(1, int(span // interval_m))
+    # Bands sit at threshold = base + k*interval for k = 0..K, where the top
+    # non-degenerate band has threshold < max. This matches the effective count
+    # build_layer_model produces (which drops a degenerate summit band when the
+    # interval divides the span exactly). The epsilon guards that boundary.
+    return max(1, int((span - 1e-9) // interval_m) + 1)
 
 
 def solve_scale(
@@ -163,8 +166,9 @@ def solve_scale(
             raise ValueError("layer_count mode requires base_elev_m and max_elev_m")
         if layer_count < 1:
             raise ValueError("layer_count must be >= 1")
-        raw_interval = (max_elev_m - base_elev_m) / layer_count
-        interval = snap_interval(raw_interval) if snap else raw_interval
+        # Divide the span evenly and do NOT snap: snapping would change the
+        # interval so the built stack no longer has the pinned layer count.
+        interval = (max_elev_m - base_elev_m) / layer_count
         e = exaggeration_from_interval(ply_thickness_mm, s, interval)
         requested_e = None
     elif interval_m is not None:

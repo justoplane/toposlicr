@@ -12,7 +12,12 @@ import json
 from pathlib import Path
 
 from ..geo import BBox
-from .overpass import OverpassFeatureProvider, _query, parse_overpass_json
+from .overpass import (
+    OverpassFeatureProvider,
+    _query,
+    check_overpass_error,
+    parse_overpass_json,
+)
 from .schema import FeatureCollection
 
 DEFAULT_CACHE_DIR = Path("cache") / "features"
@@ -38,6 +43,9 @@ def fetch_features(bbox: BBox, *, cache_dir: Path | str = DEFAULT_CACHE_DIR,
                                   timeout=provider._timeout)
     resp.raise_for_status()
     payload = resp.json()
+    # Detect an Overpass runtime error (timeout/rate-limit) BEFORE caching, so a
+    # transient failure isn't persisted as a permanent empty result.
+    check_overpass_error(payload)
     if use_cache:
         cache_dir.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload))

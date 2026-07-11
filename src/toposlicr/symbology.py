@@ -163,15 +163,26 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
 
 def _assign_lake_layer(geom_m: BaseGeometry, bands: dict[int, BaseGeometry],
                        model: LayerModel) -> int:
-    """Surface layer = the band with the greatest overlap with the lake."""
-    best_k, best_area = 0, -1.0
+    """Surface layer = the band with the greatest overlap with the lake.
+
+    If the lake overlaps no visible band (it sits entirely under a higher layer),
+    fall back to the topmost layer whose footprint contains its centroid — the
+    same rule used for point features — rather than defaulting to layer 0.
+    """
+    best_k, best_area = -1, 0.0
     for k, band in bands.items():
         if band.is_empty:
             continue
         area = geom_m.intersection(band).area
         if area > best_area:
             best_k, best_area = k, area
-    return best_k
+    if best_k >= 0:
+        return best_k
+    centroid = geom_m.centroid
+    for k in range(model.layer_count - 1, -1, -1):
+        if model.footprint(k).contains(centroid):
+            return k
+    return 0
 
 
 def _peak_text(feat: GeoFeature, cfg: Config) -> str:
