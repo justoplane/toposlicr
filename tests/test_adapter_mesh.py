@@ -7,7 +7,12 @@ import pytest
 
 trimesh = pytest.importorskip("trimesh")
 
-from toposlicr.adapters.mesh import mesh_to_bundle  # noqa: E402
+from toposlicr.adapters.mesh import (  # noqa: E402
+    MeshReport,
+    _detect_pedestal,
+    _orient,
+    mesh_to_bundle,
+)
 from toposlicr.bundle import FLAT_CRS, load_bundle  # noqa: E402
 
 
@@ -64,6 +69,51 @@ def test_bundle_round_trips_and_slices(tmp_path):
     assert model.flat and model.layer_count >= 3
     for k in range(1, model.layer_count):
         assert model.footprint(k).area <= model.footprint(k - 1).area + 1e-6
+
+
+def test_high_aspect_mesh_grid_stays_bounded(tmp_path):
+    # A long thin plate (x=4, y=200, up=z): sizing cells from the x extent alone
+    # would blow rows up to tens of thousands. The longer axis must be bounded.
+    plate = trimesh.creation.box(extents=[4.0, 200.0, 1.0])
+    src = _export(plate, tmp_path / "thin.stl")
+    out = mesh_to_bundle(src, tmp_path / "thin.terrainbundle",
+                         cells_across=100, supersample=1)
+    rows, cols = _report(out)["cells"]
+    assert max(rows, cols) <= 101              # longer axis bounded by cells_across
+    assert rows * cols <= 100 * 100            # total grid bounded
+
+
+def test_flat_ground_plain_with_hill_is_not_clipped(tmp_path):
+    # A thin ground plain + a cone hill: the plain is real terrain, not a print
+    # pedestal, so it must NOT be clipped away.
+    plain = trimesh.creation.box(extents=[8.0, 8.0, 0.1])
+    cone = trimesh.creation.cone(radius=1.5, height=3.0)
+    cone.apply_translation([0, 0, 0.05])
+    terrain = trimesh.util.concatenate([plain, cone])
+    verts = _orient(np.asarray(terrain.vertices, dtype="float64"), "z")
+    faces = np.asarray(terrain.faces, dtype="int64")
+    assert _detect_pedestal(verts, faces, MeshReport()) is None
+
+    # But a thick print slab + cone IS still detected as a pedestal.
+    base = trimesh.creation.box(extents=[8.0, 8.0, 2.0])
+    base.apply_translation([0, 0, -1.0])
+    slab = trimesh.util.concatenate([base, trimesh.creation.cone(radius=1.5, height=3.0)])
+    v2 = _orient(np.asarray(slab.vertices, dtype="float64"), "z")
+    f2 = np.asarray(slab.faces, dtype="int64")
+    assert _detect_pedestal(v2, f2, MeshReport()) is not None
+
+
+def test_all_hole_rasterization_raises(tmp_path):
+    # Two vertical walls (at y=0 and y=1): the XY bbox is non-degenerate but each
+    # face projects to a line, so no grid cell is ever covered → all-NaN relief.
+    mesh = trimesh.Trimesh(
+        vertices=[[0, 0, 0], [1, 0, 0], [0, 0, 1],
+                  [0, 1, 0], [1, 1, 0], [0, 1, 1]],
+        faces=[[0, 1, 2], [3, 4, 5]])
+    src = _export(mesh, tmp_path / "walls.stl")
+    with pytest.raises(ValueError, match="no mesh surface|covered|degenerate"):
+        mesh_to_bundle(src, tmp_path / "walls.terrainbundle", cells_across=40,
+                       supersample=1, up_axis="z", pedestal_clip="off")
 
 
 def test_pedestal_detected_and_clipped(tmp_path):

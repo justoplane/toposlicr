@@ -76,8 +76,12 @@ def stamp_ridges(field: np.ndarray, zone_mask: np.ndarray, amplitude: float,
         h, w = out.shape
         sigma = max(3.0, 0.03 * min(h, w))
         yy, xx = np.mgrid[0:h, 0:w]
-        out += amplitude * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2)
-                                    / (2.0 * sigma ** 2)))
+        d2 = (yy - cy) ** 2 + (xx - cx) ** 2
+        bump = amplitude * np.exp(-(d2 / (2.0 * sigma ** 2)))
+        # Bound the support so a point peak lifts only its neighbourhood, never
+        # the whole grid (which would raise far-away sea cells above 0).
+        bump[d2 > (4.0 * sigma) ** 2] = 0.0
+        out += bump
         return out
 
     d = distance_transform_edt(zone)
@@ -98,10 +102,18 @@ def _order_source_to_mouth(polyline, mouth, field) -> list:
     if len(pts) < 2:
         return pts
     if mouth is None:                                   # mouth = lower endpoint
+        h, w = field.shape
         r0, c0 = pts[0]
         r1, c1 = pts[-1]
-        mouth = 0 if field[int(r0), int(c0)] < field[int(r1), int(c1)] else 1
+        z0 = field[_clamp(r0, h), _clamp(c0, w)]
+        z1 = field[_clamp(r1, h), _clamp(c1, w)]
+        mouth = 0 if z0 < z1 else 1
     return list(reversed(pts)) if mouth == 0 else pts    # mouth ends up last
+
+
+def _clamp(v, hi: int) -> int:
+    """Round to an integer index clamped to [0, hi-1] (no negative wraparound)."""
+    return max(0, min(int(round(v)), hi - 1))
 
 
 def _densify(pts) -> list:
@@ -131,7 +143,9 @@ def carve_rivers(field: np.ndarray, polylines, mouths=None,
     rng = float(out.max() - out.min()) or 1.0
 
     river_mask = np.zeros((h, w), dtype=bool)
-    bed_grid = np.zeros((h, w), dtype="float64")
+    # +inf so shared cells take the running MINIMUM across crossing rivers
+    # (last-writer-wins would break per-river monotonicity at intersections).
+    bed_grid = np.full((h, w), np.inf, dtype="float64")
     if mouths is None:
         mouths = [None] * len(polylines)
 
@@ -140,16 +154,15 @@ def carve_rivers(field: np.ndarray, polylines, mouths=None,
         if len(ordered) < 2:
             continue
         dense = _densify(ordered)
-        sampled = np.array([out[min(int(round(r)), h - 1), min(int(round(c)), w - 1)]
-                            for r, c in dense])
+        sampled = np.array([out[_clamp(r, h), _clamp(c, w)] for r, c in dense])
         if np.any(np.diff(sampled) > 1e-9 * rng):
             warnings.append(f"river {idx} climbs across rising terrain "
                             "(a ridge?); carving it downhill anyway")
         bed = np.minimum.accumulate(sampled) - depth * rng      # monotone channel
         for (r, c), b in zip(dense, bed, strict=False):
-            ri, ci = min(int(round(r)), h - 1), min(int(round(c)), w - 1)
+            ri, ci = _clamp(r, h), _clamp(c, w)
             river_mask[ri, ci] = True
-            bed_grid[ri, ci] = b
+            bed_grid[ri, ci] = min(bed_grid[ri, ci], b)
 
     if river_mask.any():
         dist, (ir, ic) = distance_transform_edt(~river_mask, return_indices=True)

@@ -122,3 +122,31 @@ def test_meta_maps_pixels_back_to_height(tmp_path):
     # heights span ~10..90 (rasterised, minus water-fill zeros at edges)
     assert hi <= 90 + 1e-3
     assert np.isfinite(lo) and np.isfinite(hi) and hi > lo
+
+
+def test_burg_with_bad_coordinates_is_skipped_not_crashed(tmp_path):
+    cells = _cells([5, 40, 60, 95])
+    burgs = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"name": "Bad"},
+         "geometry": {"type": "Point", "coordinates": [1.0]}},        # short coords
+        {"type": "Feature", "properties": {"name": "Good", "population": 5},
+         "geometry": {"type": "Point", "coordinates": [1.5, 1.5]}},
+    ]}
+    out = azgaar_to_bundle(cells, tmp_path / "w", cells_across=60, burgs=burgs)
+    names = {f.name for f in load_bundle(out).features()}
+    assert "Good" in names and "Bad" not in names
+
+
+def test_all_water_export_not_normalized_to_zero(tmp_path):
+    # every cell below the water threshold → water.png must be all-set, not lost
+    cells = _cells([5, 8, 10, 15])
+    out = azgaar_to_bundle(cells, tmp_path / "w", cells_across=60, water_threshold=20)
+    b = load_bundle(out)
+    assert b.water is not None and b.water.any()
+
+
+def test_geometryless_feature_is_skipped(tmp_path):
+    cells = _cells([5, 40, 60, 95])
+    cells["features"].append({"type": "Feature", "properties": {"height": 50}})  # no geometry
+    out = azgaar_to_bundle(cells, tmp_path / "w", cells_across=60)  # must not crash
+    assert load_bundle(out).shape[1] >= 1

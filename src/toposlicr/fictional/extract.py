@@ -103,8 +103,13 @@ def _kmeans_water(rgb: np.ndarray, k: int) -> np.ndarray:
     h, w = rgb.shape[:2]
     lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
     data = lab.reshape(-1, 3).astype(np.float32)
+    # Degenerate single-colour art has no separable water cluster — k-means would
+    # split identical pixels arbitrarily. Treat it as all land instead.
+    n_unique = len(np.unique(data, axis=0))
+    if n_unique < 2 or float(data.std(axis=0).max()) < 1.0:
+        return np.zeros((h, w), dtype=bool)
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0)
-    k = max(2, min(k, len(np.unique(data, axis=0))))
+    k = max(2, min(k, n_unique))
     _, labels, _ = cv2.kmeans(data, k, None, criteria, 5, cv2.KMEANS_PP_CENTERS)
     labels = labels.reshape(h, w)
 

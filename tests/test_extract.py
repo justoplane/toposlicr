@@ -146,3 +146,11 @@ def test_ocr_labels_requires_extra():
         pytest.skip("pytesseract is installed; the gated-error path can't be tested")
     with pytest.raises(RuntimeError, match="OCR"):
         ocr_labels(np.full((30, 80, 3), 255, np.uint8))
+
+
+def test_single_color_art_is_all_land():
+    # Solid-colour art has no separable water cluster → must be treated as all
+    # land, not an arbitrary k-means split.
+    img = np.full((60, 60, 3), (80, 150, 80), dtype="uint8")
+    land = segment_land_sea(img, method="auto")
+    assert land.mean() > 0.95

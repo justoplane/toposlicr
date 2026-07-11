@@ -10,7 +10,7 @@ from toposlicr.adapters.botw import (
     botw_to_bundle,
     read_hght_tile,
 )
-from toposlicr.bundle import BundleError, load_bundle, write_gray16
+from toposlicr.bundle import BundleError, load_bundle, write_gray16, write_mask
 
 # --- raw .hght parsing -----------------------------------------------------
 
@@ -143,6 +143,32 @@ def test_botw_derives_frame_from_objmap_when_no_bounds(tmp_path):
 def test_botw_requires_a_source():
     with pytest.raises(ValueError, match="heightmap_png|terrain_dir"):
         botw_to_bundle("/tmp/nope.terrainbundle")
+
+
+def test_botw_world_bounds_aspect_mismatch_keeps_features_in_bounds(tmp_path):
+    """A world_bounds whose aspect differs from the PNG must not misregister
+    features vertically — every feature still lands within the terrain frame."""
+    # PNG is 100x100 (square) but bounds are 2000 wide x 1000 tall (2:1 aspect).
+    hp = _peaked_heightmap(tmp_path)
+    (tmp_path / "obj.geojson").write_text(json.dumps(_objmap()))
+    bdir = botw_to_bundle(tmp_path / "out.terrainbundle", heightmap_png=hp,
+                          objmap_geojson=tmp_path / "obj.geojson",
+                          world_bounds=(0, 0, 2000, 1000))
+    b = load_bundle(bdir)
+    left, top = b.transform() * (0, 0)
+    right, bottom = b.transform() * (b.shape[1], b.shape[0])
+    for f in b.features():
+        assert min(left, right) <= f.geometry.x <= max(left, right)
+        assert min(top, bottom) <= f.geometry.y <= max(top, bottom)
+
+
+def test_botw_all_water_mask_not_normalized_to_zero(tmp_path):
+    hp = _peaked_heightmap(tmp_path)
+    wp = write_mask(tmp_path / "water.png", np.ones((100, 100), bool))  # all water
+    bdir = botw_to_bundle(tmp_path / "out.terrainbundle", heightmap_png=hp,
+                          water_png=wp)
+    b = load_bundle(bdir)
+    assert b.water is not None and b.water.all()      # not silently lost
 
 
 # --- full core run ---------------------------------------------------------

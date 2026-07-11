@@ -116,15 +116,25 @@ def _detect_pedestal(verts: np.ndarray, faces: np.ndarray,
         return None
     areas = _face_areas(verts, faces)
     total = float(areas.sum()) or 1.0
-    hist, edges = np.histogram(fz[horiz].mean(1), bins=40, range=(lo, hi),
+    horiz_mean = fz[horiz].mean(1)
+    hist, edges = np.histogram(horiz_mean, bins=40, range=(lo, hi),
                                weights=areas[horiz])
     fmax = fz.max(1)
-    # Highest qualifying flat level: dominant flat area, with *sloped* terrain
-    # rising above it (not just another slab), in the lower portion of the range.
+    # A print pedestal is a SLAB: a flat top *elevated above* the model bottom,
+    # backed by a matching flat bottom face. A ground plain/plateau has flat area
+    # only at the very bottom — clipping that would delete real terrain. So we
+    # require both a bottom slab face (near lo) and the flat top to sit clearly
+    # above lo, with sloped terrain rising above it.
+    bottom_band = horiz_mean <= lo + 0.05 * rng
+    has_bottom_slab = float(areas[horiz][bottom_band].sum()) >= 0.05 * total
+    if not has_bottom_slab:
+        return None
     for k in range(len(hist) - 1, -1, -1):
         frac = hist[k] / total
         base_top = float(edges[k + 1])
         if not (frac >= 0.12 and base_top <= lo + 0.6 * rng):
+            continue
+        if base_top - lo < 0.1 * rng:                  # too thin to be a slab (it's the ground)
             continue
         sloped_above = (fmax > base_top + 0.05 * rng) & ~horiz
         if areas[sloped_above].sum() < 0.05 * total:
@@ -274,19 +284,28 @@ def mesh_to_bundle(mesh_path, out_dir, *, up_axis="auto", pedestal_clip="auto",
         if len(faces) == 0:
             raise ValueError("pedestal clip removed all geometry; try pedestal_clip=off")
 
-    # Grid from the mesh XY extent (world units == mesh units).
+    # Grid from the mesh XY extent (world units == mesh units). Size cells from
+    # the LONGER axis so cells_across bounds it — otherwise a long, thin mesh
+    # blows the other dimension up to unbounded rows/memory.
     minx, miny = verts[:, 0].min(), verts[:, 1].min()
     maxx, maxy = verts[:, 0].max(), verts[:, 1].max()
-    upp = (maxx - minx) / cells_across
-    if upp <= 0:
+    xext, yext = float(maxx - minx), float(maxy - miny)
+    if xext <= 0 or yext <= 0:
         raise ValueError("degenerate mesh XY extent")
-    cols = int(cells_across)
-    rows = max(1, int(round((maxy - miny) / upp)))
+    upp = max(xext, yext) / cells_across
+    cols = max(1, int(round(xext / upp)))
+    rows = max(1, int(round(yext / upp)))
 
     ss = max(1, int(supersample))
     zmax, span = _rasterize_zmax(verts, faces, minx, maxy, upp / ss, rows * ss, cols * ss)
     z = _blockmax(zmax, ss)
     z = z[:rows, :cols]
+
+    if not np.isfinite(z).any():
+        raise ValueError(
+            "no mesh surface covered any grid cell — likely a bad orientation or "
+            "all-degenerate/vertical faces; try a different up_axis or "
+            "pedestal_clip=off")
 
     relief = float(np.nanmax(z) - np.nanmin(z)) or 1.0
     report.overhang_fraction = float(np.mean(_blockmax(span, ss)[:rows, :cols]

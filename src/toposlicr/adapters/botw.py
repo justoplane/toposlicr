@@ -29,7 +29,14 @@ from pathlib import Path
 
 import numpy as np
 
-from ..bundle import BundleError, BundleMeta, read_gray, save_hillshade, write_gray16
+from ..bundle import (
+    BundleError,
+    BundleMeta,
+    read_gray,
+    save_hillshade,
+    write_gray16,
+    write_mask,
+)
 
 DEFAULT_SOURCE = "The Legend of Zelda: Breath of the Wild (user-supplied)"
 _ATTRIBUTION = ("Terrain and named locations from a user-supplied, legally-owned "
@@ -150,8 +157,12 @@ def _world_frame(shape, world_bounds, units_per_pixel, points):
     h, w = shape
     if world_bounds is not None:
         minx, miny, maxx, maxy = world_bounds
-        upp = (maxx - minx) / w
-        return (minx, maxy), upp
+        # Reconcile the y extent with the image height: sizing cells from x alone
+        # vertically misregisters features when the PNG aspect ratio differs from
+        # the declared bounds. Square cells over the larger extent, centred.
+        upp = max((maxx - minx) / w, (maxy - miny) / h)
+        cx, cy = (minx + maxx) / 2.0, (miny + maxy) / 2.0
+        return (cx - w * upp / 2.0, cy + h * upp / 2.0), upp
     if points:
         xs = [p["x"] for p in points]
         ys = [p["y"] for p in points]
@@ -200,7 +211,8 @@ def botw_to_bundle(out_dir, *, heightmap_png=None, terrain_dir=None,
         wm = read_gray(water_png)
         if wm.shape != height.shape:
             raise BundleError("water_png grid does not match the heightmap")
-        write_gray16(out / "water.png", (wm > 0).astype("float64"))
+        # write_mask (not write_gray16) so an all-water mask isn't normalized to 0.
+        write_mask(out / "water.png", wm > 0)
 
     lo, hi = float(np.nanmin(height)), float(np.nanmax(height))
     meta = BundleMeta(

@@ -95,15 +95,21 @@ def build_layer_model(dem_geographic: DemRaster, cfg: Config,
         utm = dem_geographic.to_crs(f"EPSG:{epsg}")
 
     # 2. Elevation range → base datum and solved scale. Optional percentile clip
-    #    keeps a lone spire from stretching every band (fictional-terrain hygiene).
+    #    keeps anomalous spires/pits from stretching the banding without amputating
+    #    the base footprint: the LOW percentile becomes the floor (and the field is
+    #    clamped up to it below, so layer 0 stays a full solid slab), while the HIGH
+    #    percentile caps the span so a lone spire merges into the top band.
+    import numpy as np
+
+    true_zmin, true_zmax = utm.elevation_range()
     if cfg.physical.clip_percentiles:
-        import numpy as np
         valid = utm.masked().compressed()
         lo, hi = cfg.physical.clip_percentiles
-        zmin, zmax = float(np.percentile(valid, lo)), float(np.percentile(valid, hi))
+        low_clip = float(np.percentile(valid, lo))
+        zmax = float(np.percentile(valid, hi))
     else:
-        zmin, zmax = utm.elevation_range()
-    base = zmin if cfg.physical.base_datum == "auto" else float(cfg.physical.base_datum)
+        low_clip, zmax = true_zmin, true_zmax
+    base = low_clip if cfg.physical.base_datum == "auto" else float(cfg.physical.base_datum)
     if base > zmax:
         raise ValueError(f"base datum {base} is above the terrain max {zmax:.0f}")
 
@@ -133,8 +139,11 @@ def build_layer_model(dem_geographic: DemRaster, cfg: Config,
     matrix = _world_to_model_matrix(x_min, y_min, k_mm_per_m)
     model_height_mm = utm_height * k_mm_per_m
 
-    # 4. Smooth once, then slice each band from the shared field.
+    # 4. Smooth once, then slice each band from the shared field. Clamp up to the
+    #    low floor so terrain below it joins the base slab instead of vanishing.
     z = smooth_dem(utm.data, cfg.contour.smoothing_px)
+    if cfg.physical.clip_percentiles and cfg.physical.base_datum == "auto":
+        z = np.where(np.isnan(z), z, np.maximum(z, low_clip))
     xs, ys = utm.pixel_coords()
 
     interval = scale.interval_m
@@ -145,7 +154,11 @@ def build_layer_model(dem_geographic: DemRaster, cfg: Config,
     prev_geom_model: BaseGeometry | None = None
     for k in range(n_layers):
         threshold = base + k * interval
-        world_geom = band_polygon(utm, threshold, xs, ys, z)
+        # Filled contours exclude cells sitting exactly at the lower level, so a
+        # flat floor at the minimum (ocean/plain) would leave the base slab holed.
+        # Nudge the base-layer threshold just below the minimum to capture it.
+        lower = threshold - interval * 1e-3 if k == 0 else threshold
+        world_geom = band_polygon(utm, lower, xs, ys, z)
         if world_geom.is_empty:
             continue
         model_geom = affine_transform(world_geom, matrix)
@@ -185,6 +198,15 @@ def build_layer_model(dem_geographic: DemRaster, cfg: Config,
 
     if not layers:
         raise ValueError("no layers produced; check interval, base datum and bbox")
+
+    # Warn when the stack collapsed far below the requested count — usually a
+    # lone spire dominating the range. Percentile clipping is the fix.
+    if layer_count and len(layers) < max(2, layer_count // 2):
+        warnings.append(
+            f"requested {layer_count} layers but only {len(layers)} produced — the "
+            "elevation range is likely dominated by a small area; set "
+            "clip_percentiles (e.g. [0.5, 99.5]) to normalize the banding."
+        )
 
     return LayerModel(
         layers=layers,

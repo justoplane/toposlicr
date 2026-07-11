@@ -195,3 +195,32 @@ def test_synthesize_to_bundle_loads_and_bands(tmp_path):
     model = build_layer_model(b.to_dem(), cfg)
     assert model.flat
     assert 4 <= model.layer_count <= 10
+
+
+def test_point_peak_leaves_far_cells_unchanged():
+    field = np.zeros((80, 80))
+    zone = np.zeros((80, 80), dtype=bool)
+    zone[40, 40] = True                       # single-pixel (point) zone
+    out = stamp_ridges(field, zone, amplitude=1.0)
+    assert out[40, 40] > 0.4                  # peak raised
+    assert out[0, 0] == 0.0                    # far corner untouched (bounded support)
+    assert out[-1, -1] == 0.0
+
+
+def test_crossing_rivers_take_min_at_intersection():
+    field = np.tile(np.linspace(1.0, 0.0, 60), (60, 1))     # decreasing left→right
+    r1 = [(30, c) for c in range(5, 55)]                    # horizontal
+    r2 = [(r, 30) for r in range(5, 55)]                    # vertical (crosses at 30,30)
+    both, _ = carve_rivers(field, [r1, r2])
+    only1, _ = carve_rivers(field, [r1])
+    only2, _ = carve_rivers(field, [r2])
+    # running-minimum across writers: the crossing is no higher than either alone
+    assert both[30, 30] <= min(only1[30, 30], only2[30, 30]) + 1e-9
+    assert np.all(np.isfinite(both))
+
+
+def test_river_far_out_of_bounds_vertex_is_clamped_not_indexerror():
+    field = np.tile(np.linspace(1.0, 0.0, 40), (40, 1))
+    pl = [(-100, 10), (20, 20), (100, 35)]                  # far out of bounds
+    out, _ = carve_rivers(field, [pl])                      # clamped, no IndexError
+    assert np.all(np.isfinite(out))

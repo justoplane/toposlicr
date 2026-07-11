@@ -216,3 +216,66 @@ def test_fictional_pipeline_end_to_end(tmp_path):
     materials = {b.material for b in res.boards}
     assert "blue_acrylic_3mm" in materials
     assert any(p.kind == "acrylic" for p in res.parts)
+
+
+def _plain_with_spire_bundle(root, n=160):
+    """A wide flat plain at the minimum with a small central spire."""
+    bdir = root / "plain.terrainbundle"
+    bdir.mkdir(parents=True, exist_ok=True)
+    ys, xs = np.mgrid[0:n, 0:n] / n
+    z = 0.05 * np.ones((n, n))
+    z += np.exp(-(((xs - 0.5) ** 2 + (ys - 0.5) ** 2) / (2 * 0.008)))
+    write_gray16(bdir / "heightmap.png", z)
+    (bdir / "meta.json").write_text(json.dumps(
+        BundleMeta(units_per_pixel=50.0, world_origin=(0.0, n * 50.0)).to_dict()))
+    return bdir
+
+
+def test_flat_base_is_a_full_slab(tmp_path):
+    """A flat floor at the minimum must not leave the base layer holed."""
+    from toposlicr.config import parse_config
+    from toposlicr.layers import build_layer_model
+    bdir = _plain_with_spire_bundle(tmp_path)
+    cfg = parse_config({"region": {"bundle": str(bdir)},
+                        "physical": {"model_width_mm": 300, "normalize_layers": 8}})
+    m = build_layer_model(load_bundle(bdir).to_dem(), cfg)
+    frac = m.footprint(0).area / (m.model_width_mm * m.model_height_mm)
+    assert frac > 0.95           # near-full slab (only the half-cell border missing)
+
+
+def test_clip_percentiles_does_not_amputate_base(tmp_path):
+    from toposlicr.config import parse_config
+    from toposlicr.layers import build_layer_model
+    bdir = _plain_with_spire_bundle(tmp_path)
+    dem = load_bundle(bdir).to_dem()
+    base_no_clip = build_layer_model(
+        dem, parse_config({"region": {"bundle": str(bdir)},
+                           "physical": {"model_width_mm": 300,
+                                        "normalize_layers": 8}})).footprint(0).area
+    base_clip = build_layer_model(
+        dem, parse_config({"region": {"bundle": str(bdir)},
+                           "physical": {"model_width_mm": 300, "normalize_layers": 8,
+                                        "clip_percentiles": [20, 99]}})).footprint(0).area
+    # Clipping must NOT shrink the base footprint (the bug it caused before).
+    assert base_clip >= base_no_clip - 1.0
+
+
+def test_river_point_feature_gets_labeled(tmp_path):
+    """A point 'river' row (no linework) is labeled, not silently dropped."""
+    from shapely.geometry import Point
+
+    from toposlicr.bundle import FLAT_EPSG
+    from toposlicr.config import parse_config
+    from toposlicr.features.schema import FeatureCollection, FeatureType, GeoFeature
+    from toposlicr.layers import build_layer_model
+    from toposlicr.symbology import build_symbology
+
+    bdir = _make_bundle(tmp_path)
+    cfg = parse_config({"region": {"bundle": str(bdir)},
+                        "physical": {"model_width_mm": 300, "normalize_layers": 6}})
+    model = build_layer_model(load_bundle(bdir).to_dem(), cfg)
+    coll = FeatureCollection(epsg=FLAT_EPSG)
+    coll.add(GeoFeature(FeatureType.RIVER, Point(5000, 6000), name="Silverflow"))
+    sym = build_symbology(model, coll, cfg)
+    labeled = [p.text for p in sym.labels.placed]
+    assert any("Silverflow" in t for t in labeled)

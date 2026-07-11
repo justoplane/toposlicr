@@ -117,6 +117,16 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
             continue
 
         if feat.feature_type is FeatureType.RIVER:
+            if geom_m.length == 0:
+                # A point 'river' row (e.g. an Azgaar named river with no
+                # linework) — label it like a place rather than dropping it.
+                pt = geom_m if isinstance(geom_m, Point) else geom_m.centroid
+                k = _assign_point_layer(pt, bands, model)
+                if feat.name:
+                    label_requests.append(LabelRequest(
+                        text=feat.name, anchor=pt, layer_index=k, is_point=True,
+                        cap_height_mm=sym.labels.cap_height_mm, font=sym.labels.font))
+                continue
             # A river is scored on every layer it crosses, only where exposed.
             for k, band in bands.items():
                 clipped = geom_m.intersection(band)

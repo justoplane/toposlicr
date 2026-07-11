@@ -33,7 +33,8 @@ from .features.schema import FeatureCollection, FeatureType, GeoFeature
 FLAT_EPSG = 0
 
 __all__ = ["FLAT_CRS", "FLAT_EPSG", "BundleMeta", "TerrainBundle", "BundleError",
-           "load_bundle", "read_gray", "write_gray16", "hillshade", "save_hillshade"]
+           "load_bundle", "read_gray", "write_gray16", "write_mask", "hillshade",
+           "save_hillshade"]
 
 # Bundle feature-type strings → core FeatureType.
 _FEATURE_TYPES = {
@@ -240,6 +241,21 @@ def read_gray(path: str | Path) -> np.ndarray:
     if arr.ndim == 3:                      # collapse accidental RGB to luminance
         arr = arr[..., 0]
     return arr
+
+
+def write_mask(path: str | Path, mask: np.ndarray) -> Path:
+    """Write a boolean/0-1 mask as a 16-bit PNG (0 or 65535), no normalization.
+
+    ``write_gray16`` min/max-normalizes, which would turn an all-True mask into
+    all zeros — use this for water/binary masks so nonzero always means 'set'.
+    """
+    from PIL import Image
+
+    arr = (np.asarray(mask).astype(bool)).astype("uint16") * 65535
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(arr).save(p)
+    return p
 
 
 def write_gray16(path: str | Path, data: np.ndarray) -> Path:

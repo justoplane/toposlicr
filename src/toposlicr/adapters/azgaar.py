@@ -28,7 +28,7 @@ from pathlib import Path
 import click
 from affine import Affine
 
-from ..bundle import BundleMeta, save_hillshade, write_gray16
+from ..bundle import BundleMeta, save_hillshade, write_gray16, write_mask
 
 # Azgaar convention: cell height < 20 is water (sea/lake).
 DEFAULT_WATER_THRESHOLD = 20
@@ -55,7 +55,10 @@ def azgaar_to_bundle(cells_geojson, out_dir, *, rivers_geojson=None, burgs=None,
     minx = miny = math.inf
     maxx = maxy = -math.inf
     for f in feats:
-        geom = shape(f["geometry"])
+        raw = f.get("geometry")
+        if not raw:
+            continue
+        geom = shape(raw)
         if geom.is_empty:
             continue
         height = float((f.get("properties") or {}).get("height", 0) or 0)
@@ -89,7 +92,8 @@ def azgaar_to_bundle(cells_geojson, out_dir, *, rivers_geojson=None, burgs=None,
 
     write_gray16(out / "heightmap.png", height_grid)
     if water_mask.any():
-        write_gray16(out / "water.png", water_mask.astype("uint16"))
+        # write_mask, not write_gray16: an all-water export must not normalize to 0.
+        write_mask(out / "water.png", water_mask)
 
     lo, hi = float(height_grid.min()), float(height_grid.max())
     # write_gray16 normalises by the array's own [lo, hi] to fill 16-bit, so the
@@ -134,7 +138,10 @@ def _iter_burgs(burgs):
             geom = f.get("geometry") or {}
             if geom.get("type") != "Point":
                 continue
-            x, y = geom["coordinates"][:2]
+            coords = geom.get("coordinates") or []
+            if len(coords) < 2:
+                continue
+            x, y = coords[0], coords[1]
             props = f.get("properties") or {}
             yield (_first(props, "name", "Burg", "burg"), float(x), float(y),
                    _maybe_num(_first(props, "population", "Population", "pop")))
@@ -173,7 +180,10 @@ def _river_rows(rivers_geojson) -> list[dict]:
     data = _load_geojson(rivers_geojson)
     rows = []
     for f in data.get("features") or []:
-        geom = shape(f["geometry"])
+        raw = f.get("geometry")
+        if not raw:
+            continue
+        geom = shape(raw)
         if geom.is_empty:
             continue
         pt = geom.interpolate(0.5, normalized=True) if geom.geom_type == "LineString" \

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..bundle import BundleMeta, save_hillshade, write_gray16
+from ..bundle import BundleMeta, save_hillshade, write_gray16, write_mask
 
 # Amplitude/profile per painted terrain class (spec 3.2 step 2).
 _ZONE_AMPLITUDE = {"mountain": 1.0, "hill": 0.4, "plateau": 0.5}
@@ -91,13 +91,13 @@ def art_to_bundle(art_path, out_dir, *, class_overlay=None, adjustment_layer=Non
     # Water: interior lakes only — the ocean is the base, not an acrylic inset.
     lakes = _interior_water(~land)
     if lakes.any():
-        write_gray16(out / "water.png", lakes.astype("uint16") * 65535)
+        write_mask(out / "water.png", lakes)
 
     transform_hw = (cells_h, units_per_pixel)
     if river_lines:
         _write_rivers_geojson(out / "rivers.geojson", river_lines, transform_hw)
 
-    _write_features(out / "features.csv", small if ocr else None)
+    _write_features(out / "features.csv", small if ocr else None, transform_hw)
 
     meta = BundleMeta(units_per_pixel=units_per_pixel, height_scale=1.0 / 65535.0,
                       height_offset=0.0, world_origin=(0.0, cells_h * units_per_pixel),
@@ -140,7 +140,9 @@ def _interior_water(water: np.ndarray) -> np.ndarray:
 
 
 def _pix_to_world(row, col, cells_h, upp):
-    return (col * upp, (cells_h - row) * upp)
+    # Pixel centers (+0.5), matching the core's contour sampling, so features and
+    # rivers register with the terrain rather than sitting half a cell off.
+    return ((col + 0.5) * upp, (cells_h - row - 0.5) * upp)
 
 
 def _write_rivers_geojson(path, polylines, transform_hw):
@@ -154,14 +156,19 @@ def _write_rivers_geojson(path, polylines, transform_hw):
     path.write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
 
 
-def _write_features(path, ocr_img):
+def _write_features(path, ocr_img, transform_hw):
     import csv
 
+    cells_h, upp = transform_hw
     rows = []
     if ocr_img is not None:
         from ..fictional.extract import ocr_labels
         for lab in ocr_labels(ocr_img):
-            rows.append(lab)
+            # OCR reports pixel positions; convert to the heightmap's world frame.
+            px, py = lab.get("x", 0), lab.get("y", 0)
+            wx, wy = _pix_to_world(py, px, cells_h, upp)
+            rows.append({"name": lab.get("name") or lab.get("text", ""),
+                         "type": "place", "x": wx, "y": wy, "include": "yes"})
     with path.open("w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=["name", "type", "x", "y", "elev",
                                            "include", "icon", "label_override"])
