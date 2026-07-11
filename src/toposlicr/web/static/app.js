@@ -11,27 +11,18 @@ function setStatus(text, cls) {
   el.className = "chip" + (cls ? " " + cls : "");
 }
 
-// --- config assembly from the form ----------------------------------------
-function readConfig() {
-  const bbox = [num("west"), num("south"), num("east"), num("north")];
-  const physical = {
-    model_width_mm: num("model_width_mm"),
-    ply_thickness_mm: num("ply_thickness_mm"),
-  };
-  physical[val("driver")] = num("driver_value");
+let mode = "real";
 
+// Config blocks shared by both real and fictional runs.
+function commonBlocks() {
   const overrides = {};
   val("mat_overrides").split(",").forEach((pair) => {
     const [k, v] = pair.split("=").map((s) => s && s.trim());
     if (k && v) overrides[k] = v;
   });
-
   const peaks = { min_prominence_m: num("peak_prom"), label_elevation: true };
   if (val("peak_max") !== "") peaks.max_count = parseInt(val("peak_max"), 10);
-
   return {
-    region: { bbox, dem: val("dem") },
-    physical,
     machine: {
       profile: "glowforge",
       bed_mm: [num("bed_w"), num("bed_h")],
@@ -51,6 +42,32 @@ function readConfig() {
     },
     panelization: { seam_margin_mm: num("seam_margin"), seam_joint: val("seam_joint") },
   };
+}
+
+// Real-world config (bbox + a scale driver).
+function readConfig() {
+  const physical = {
+    model_width_mm: num("model_width_mm"),
+    ply_thickness_mm: num("ply_thickness_mm"),
+  };
+  physical[val("driver")] = num("driver_value");
+  return {
+    region: { bbox: [num("west"), num("south"), num("east"), num("north")], dem: val("dem") },
+    physical,
+    ...commonBlocks(),
+  };
+}
+
+// Fictional config — no region (the adapter supplies the bundle); normalize_layers.
+function fictionalConfig() {
+  const physical = {
+    model_width_mm: num("model_width_mm"),
+    ply_thickness_mm: num("ply_thickness_mm"),
+    normalize_layers: parseInt(val("fnorm"), 10),
+  };
+  const clip = val("fclip").split(",").map((s) => parseFloat(s.trim())).filter((n) => !isNaN(n));
+  if (clip.length === 2) physical.clip_percentiles = clip;
+  return { physical, ...commonBlocks() };
 }
 
 function readOptions() {
@@ -92,6 +109,37 @@ function requestBody() {
   if ($("use_toml").checked && val("toml")) body.toml = val("toml");
   else body.config = readConfig();
   return body;
+}
+
+async function uploadFile(inputId) {
+  const f = $(inputId).files[0];
+  if (!f) return null;
+  const fd = new FormData();
+  fd.append("file", f);
+  const r = await fetch("/api/upload", { method: "POST", body: fd });
+  if (!r.ok) throw new Error("upload failed");
+  return (await r.json()).path;
+}
+
+// Build the {adapt, config, options} body for a fictional run (uploads first).
+async function fictionalBody() {
+  const tier = val("ftier");
+  const extra = { cells_across: num("fcells"), normalize_layers: parseInt(val("fnorm"), 10) };
+  let source_path;
+  if (tier === "bundle") {
+    source_path = val("fpath");
+    if (!source_path) throw new Error("enter the bundle path");
+  } else {
+    appendLog("uploading source …");
+    source_path = await uploadFile("ffile");
+    if (!source_path) throw new Error("choose a source file");
+    if (tier === "art") {
+      extra.segmentation = val("fseg");
+      const ov = await uploadFile("foverlay");
+      if (ov) extra.class_overlay = ov;
+    }
+  }
+  return { adapt: { tier, source_path, extra }, config: fictionalConfig(), options: readOptions() };
 }
 
 // --- Leaflet map with a draggable bbox rectangle --------------------------
@@ -187,11 +235,16 @@ async function run() {
   $("resultscard").classList.add("hidden");
   $("log").textContent = "";
 
+  let body;
+  try {
+    body = mode === "fictional" ? await fictionalBody() : requestBody();
+  } catch (e) { return fail(e.message || "invalid input"); }
+
   let res;
   try {
     res = await fetch("/api/run", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody()),
+      body: JSON.stringify(body),
     });
   } catch (e) { return fail("could not reach server"); }
   const data = await res.json();
@@ -285,6 +338,25 @@ async function showSvg(btn) {
 
 function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
 
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll(".tab").forEach((t) =>
+    t.classList.toggle("active", t.dataset.mode === m));
+  document.querySelectorAll(".mode-real").forEach((e) => e.classList.toggle("hidden", m !== "real"));
+  document.querySelectorAll(".mode-fictional").forEach((e) => e.classList.toggle("hidden", m !== "fictional"));
+  // Live scale only applies to real-world (fictional needs the bundle).
+  $("scalecard").classList.toggle("hidden", m === "fictional");
+  if (m === "real") liveScale();
+}
+
+function updateSourceFields() {
+  const tier = val("ftier");
+  $("ffile-wrap").classList.toggle("hidden", tier === "bundle");
+  $("fpath-wrap").classList.toggle("hidden", tier !== "bundle");
+  $("foverlay-wrap").classList.toggle("hidden", tier !== "art");
+  $("fseg-wrap").classList.toggle("hidden", tier !== "art");
+}
+
 // --- wiring ----------------------------------------------------------------
 function wire() {
   ["west", "south", "east", "north"].forEach((id) =>
@@ -298,6 +370,12 @@ function wire() {
   $("run").addEventListener("click", run);
   $("toggle_toml").addEventListener("click", () => $("toml_wrap").classList.toggle("hidden"));
   $("from_form").addEventListener("click", () => { $("toml").value = toToml(readConfig()); });
+
+  // Real / Fictional tab switch.
+  document.querySelectorAll(".tab").forEach((t) =>
+    t.addEventListener("click", () => setMode(t.dataset.mode)));
+  $("ftier").addEventListener("change", updateSourceFields);
+  updateSourceFields();
   // The map is a convenience over the numeric fields; if Leaflet (CDN) fails to
   // load, keep the rest of the app fully functional.
   try {

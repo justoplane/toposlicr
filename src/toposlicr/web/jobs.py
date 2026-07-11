@@ -48,14 +48,53 @@ class JobRegistry:
 
     def create(self, cfg: Config, options: dict[str, Any],
                api_key: str | None = None) -> Job:
-        job_id = uuid.uuid4().hex[:12]
-        job = Job(id=job_id, out_dir=self.runs_dir / job_id)
-        job.out_dir.mkdir(parents=True, exist_ok=True)
-        self._jobs[job_id] = job
+        job = self._new_job()
         thread = threading.Thread(target=self._run, args=(job, cfg, options, api_key),
                                   daemon=True)
         thread.start()
         return job
+
+    def create_fictional(self, config_data: dict[str, Any], adapt: dict[str, Any],
+                         options: dict[str, Any]) -> Job:
+        """Run an adapter (source → bundle) then the pipeline, in one job."""
+        job = self._new_job()
+        thread = threading.Thread(target=self._run_fictional,
+                                  args=(job, config_data, adapt, options), daemon=True)
+        thread.start()
+        return job
+
+    def _new_job(self) -> Job:
+        job_id = uuid.uuid4().hex[:12]
+        job = Job(id=job_id, out_dir=self.runs_dir / job_id)
+        job.out_dir.mkdir(parents=True, exist_ok=True)
+        self._jobs[job_id] = job
+        return job
+
+    def _run_fictional(self, job: Job, config_data: dict[str, Any],
+                       adapt: dict[str, Any], options: dict[str, Any]) -> None:
+        from ..config import parse_config
+
+        job.status = "running"
+        try:
+            bundle_dir = run_adapter(adapt, job.out_dir, job.log)
+            config_data = dict(config_data)
+            config_data["region"] = {"bundle": str(bundle_dir)}
+            cfg = parse_config(config_data)
+            for w in cfg.warnings:
+                job.log(f"config: {w}")
+            result = run_pipeline(
+                cfg, job.out_dir, log=job.log,
+                use_cache=bool(options.get("use_cache", True)),
+                write_debug=bool(options.get("write_debug", True)),
+                panelize=bool(options.get("panelize", True)),
+                nest=bool(options.get("nest", True)),
+                project_name=str(options.get("project_name", "world")))
+            job.result = summarize(job, result)
+            job.status = "done"
+        except Exception as exc:  # noqa: BLE001
+            job.error = f"{type(exc).__name__}: {exc}"
+            job.status = "error"
+            job.log(f"error: {job.error}")
 
     def _run(self, job: Job, cfg: Config, options: dict[str, Any],
              api_key: str | None) -> None:
@@ -77,6 +116,45 @@ class JobRegistry:
             job.error = f"{type(exc).__name__}: {exc}"
             job.status = "error"
             job.log(f"error: {job.error}")
+
+
+def run_adapter(adapt: dict[str, Any], out_dir: Path, log) -> Path:
+    """Dispatch a source → terrain-bundle adapter. Returns the bundle directory."""
+    tier = adapt.get("tier", "bundle")
+    src = adapt.get("source_path")
+    extra = adapt.get("extra") or {}
+    bundle = out_dir / "world.terrainbundle"
+
+    if tier == "bundle":
+        if not src or not Path(src).is_dir():
+            raise ValueError("bundle tier needs an existing *.terrainbundle path")
+        log(f"[bundle] using existing bundle {src}")
+        return Path(src)
+
+    log(f"[adapt:{tier}] {Path(src).name if src else ''} → bundle …")
+    cells = int(extra.get("cells_across", 800))
+    if tier == "mesh":
+        from ..adapters.mesh import mesh_to_bundle
+        return mesh_to_bundle(src, bundle, cells_across=cells,
+                              up_axis=extra.get("up_axis", "auto"),
+                              pedestal_clip=extra.get("pedestal_clip", "auto"))
+    if tier == "art":
+        from ..adapters.art import art_to_bundle
+        return art_to_bundle(src, bundle, cells_across=cells,
+                             class_overlay=extra.get("class_overlay"),
+                             water_segmentation=extra.get("segmentation", "auto"),
+                             normalize_layers=int(extra.get("normalize_layers", 12)))
+    if tier == "azgaar":
+        from ..adapters.azgaar import azgaar_to_bundle
+        return azgaar_to_bundle(src, bundle, cells_across=cells,
+                                rivers_geojson=extra.get("rivers"),
+                                burgs=extra.get("burgs"))
+    if tier == "botw":
+        from ..adapters.botw import botw_to_bundle
+        return botw_to_bundle(bundle, heightmap_png=src,
+                              objmap_geojson=extra.get("objmap"),
+                              water_png=extra.get("water"))
+    raise ValueError(f"unknown adapter tier: {tier!r}")
 
 
 def _file_url(job: Job, path: Path) -> str:

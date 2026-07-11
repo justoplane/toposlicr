@@ -99,3 +99,31 @@ def test_file_traversal_blocked(client):
 def test_unknown_job_404(client):
     assert client.get("/api/jobs/nope").status_code == 404
     assert client.get("/api/jobs/nope/zip").status_code == 404
+
+
+def test_fictional_upload_and_adapt_run(client, tmp_path):
+    """Upload a mesh, run it through the adapter + pipeline in one job."""
+    trimesh = pytest.importorskip("trimesh")
+    mesh = trimesh.util.concatenate([
+        trimesh.creation.box(extents=[60, 60, 3]),
+        trimesh.creation.cone(radius=20, height=25),
+    ])
+    stl = tmp_path / "world.stl"
+    mesh.export(str(stl))
+
+    with stl.open("rb") as fh:
+        up = client.post("/api/upload",
+                         files={"file": ("world.stl", fh, "application/octet-stream")})
+    assert up.status_code == 200
+    src = up.json()["path"]
+
+    body = {
+        "adapt": {"tier": "mesh", "source_path": src, "extra": {"cells_across": 150}},
+        "config": {"physical": {"model_width_mm": 250, "normalize_layers": 6},
+                   "machine": {"bed_mm": [495, 279]}, "materials": {"default": "birch_3mm"}},
+        "options": {"project_name": "World"},
+    }
+    _, st = _run_to_completion(client, body, timeout=120)
+    assert st["status"] == "done", st.get("error")
+    assert st["result"]["total_boards"] >= 1
+    assert any("adapt:mesh" in line for line in st["logs"])

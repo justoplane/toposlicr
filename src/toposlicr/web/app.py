@@ -12,10 +12,11 @@ import asyncio
 import json
 import os
 import tomllib
+import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -66,11 +67,28 @@ def create_app(runs_dir: str | Path | None = None) -> FastAPI:
             "warnings": warnings + result.warnings,
         }
 
+    @app.post("/api/upload")
+    async def upload(file: UploadFile = File(...)) -> dict[str, Any]:  # noqa: B008
+        """Save an uploaded source file (mesh/art/geojson) for a fictional run."""
+        dest = registry.runs_dir / "uploads" / uuid.uuid4().hex[:12]
+        dest.mkdir(parents=True, exist_ok=True)
+        path = dest / Path(file.filename or "upload").name
+        with path.open("wb") as fh:
+            while chunk := await file.read(1 << 20):
+                fh.write(chunk)
+        return {"path": str(path), "filename": path.name}
+
     @app.post("/api/run")
     async def run(request: Request) -> dict[str, Any]:
         payload = await request.json()
-        cfg, warnings = _config_from_payload(payload)
         options = payload.get("options") or {}
+        adapt = payload.get("adapt")
+        if adapt:
+            # Fictional: config carries no region yet — the adapter supplies the
+            # bundle inside the job, so validation happens there.
+            job = registry.create_fictional(payload.get("config") or {}, adapt, options)
+            return {"job_id": job.id, "config_warnings": []}
+        cfg, warnings = _config_from_payload(payload)
         api_key = os.environ.get("OPENTOPOGRAPHY_API_KEY")
         job = registry.create(cfg, options, api_key=api_key)
         return {"job_id": job.id, "config_warnings": warnings}

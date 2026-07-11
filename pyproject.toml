@@ -29,6 +29,7 @@ dependencies = [
 web = [
     "fastapi>=0.110",
     "uvicorn>=0.27",
+    "python-multipart>=0.0.9",
 ]
 dev = [
     "pytest>=8.0",

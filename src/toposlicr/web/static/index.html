@@ -22,7 +22,12 @@
   <main>
     <!-- ------------------------------------------------------------------ -->
     <section id="form" class="panel">
-      <div class="group">
+      <div class="tabs">
+        <button class="tab active" data-mode="real">Real world</button>
+        <button class="tab" data-mode="fictional">Fictional</button>
+      </div>
+
+      <div class="group mode-real">
         <h2>Region</h2>
         <div class="row4">
           <label>West<input id="west" type="number" step="0.001" value="-118.32"></label>
@@ -41,13 +46,38 @@
         </label>
       </div>
 
+      <div class="group mode-fictional hidden">
+        <h2>Source</h2>
+        <label>Source type
+          <select id="ftier">
+            <option value="mesh">3D mesh (STL/OBJ/glTF) — Tier 2</option>
+            <option value="art">2D artwork (PNG/JPG) — Tier 3</option>
+            <option value="azgaar">Azgaar cells GeoJSON</option>
+            <option value="bundle">Existing bundle (server path)</option>
+          </select>
+        </label>
+        <label id="ffile-wrap">Source file<input id="ffile" type="file"></label>
+        <label id="fpath-wrap" class="hidden">Bundle path (server-side)
+          <input id="fpath" type="text" placeholder="/path/to/world.terrainbundle"></label>
+        <label id="foverlay-wrap" class="hidden">Terrain-class overlay (optional, art)
+          <input id="foverlay" type="file"></label>
+        <div class="row2">
+          <label>Grid cells across<input id="fcells" type="number" value="800"></label>
+          <label id="fseg-wrap" class="hidden">Segmentation
+            <select id="fseg"><option value="auto">auto</option>
+              <option value="flood_fill">flood fill</option></select>
+          </label>
+        </div>
+        <p class="muted" style="font-size:11px">Files stay local; nothing is uploaded off your machine.</p>
+      </div>
+
       <div class="group">
         <h2>Physical</h2>
         <div class="row2">
           <label>Model width (mm)<input id="model_width_mm" type="number" value="450"></label>
           <label>Ply thickness (mm)<input id="ply_thickness_mm" type="number" step="0.1" value="3.0"></label>
         </div>
-        <div class="row2">
+        <div class="row2 mode-real">
           <label>Scale driver
             <select id="driver">
               <option value="exaggeration">exaggeration ×</option>
@@ -56,6 +86,10 @@
             </select>
           </label>
           <label>Value<input id="driver_value" type="number" step="0.1" value="100"></label>
+        </div>
+        <div class="row2 mode-fictional hidden">
+          <label>Normalize layers<input id="fnorm" type="number" value="12"></label>
+          <label>Clip percentiles<input id="fclip" type="text" value="0.5, 99.5"></label>
         </div>
       </div>
 
