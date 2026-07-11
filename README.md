@@ -100,6 +100,49 @@ Colors map to laser operations via the machine profile (`[machine.colors]`):
 black cut, red registration score, blue hydro score, teal part-ID score, filled
 grey label engraving — the Glowforge/color-as-operation convention.
 
+## Fictional maps
+
+Cut maps of fictional worlds — games, 3D models, or fantasy artwork — not just
+real terrain. Every source converges on one neutral **terrain bundle** that the
+core consumes exactly like a DEM (flat coordinates, no CRS; vertical scale via
+`normalize_layers` since fictional elevation units are meaningless):
+
+```
+world.terrainbundle/
+  heightmap.png    16-bit grayscale, one value per cell
+  water.png        optional water mask (→ acrylic lake insets)
+  meta.json        units-per-pixel, height scale, origin, attribution
+  features.csv     name, type, x, y, elev, include, icon, label_override
+  rivers.geojson   optional river linework (scored per layer)
+```
+
+An adapter turns each source into a bundle; then you `run` it like any config:
+
+```bash
+uv run toposlicr adapt mesh   world.stl      -o world.terrainbundle   # Tier 2: 3D mesh
+uv run toposlicr adapt art    map.png        -o world.terrainbundle   # Tier 3: 2D artwork
+uv run toposlicr adapt azgaar cells.geojson  -o world.terrainbundle   # Azgaar FMG export
+uv run toposlicr adapt botw   --heightmap h.png --objmap objs.geojson # Tier 1: BotW
+uv run toposlicr run examples/fictional-bundle.toml -o output --name Mythwold
+```
+
+- **Tier 1 — extractable game terrain** (best case; reference = Breath of the
+  Wild): user-supplied heightmap + ZeldaMods objmap → exact terrain, water and
+  named features. Raw `.hght` tiles are read directly; full `.tscb` placement is
+  delegated to the community `BotWHeightMapConverter`.
+- **Tier 2 — 3D mesh** (STL/OBJ/glTF): ray/triangle top-surface rasterization
+  with up-axis detection, pedestal removal and hole-fill.
+- **Tier 3 — 2D artwork**: land/sea segmentation + a painted terrain-class
+  overlay drive heightfield *synthesis* (coastal ramp, ridge stamping, river
+  carving, band-aware noise). Authoring assisted by automation — every run emits
+  hillshade + relief-over-art previews for a paint-and-rerun refine loop.
+- **Azgaar Fantasy Map Generator**: its cell heightmap is data, not art — the
+  cleanest path (and legally clean; Azgaar maps are free for commercial use).
+
+Adapters operate only on files you supply from your own legally-owned copies;
+they never download or bundle game assets or artwork. Needs the fictional extra:
+`uv sync --extra fictional` (OCR/SAM/ML-depth assists are further optional extras).
+
 ## Development
 
 ```bash
@@ -120,6 +163,9 @@ All phases implemented:
 - **Phase 4 — Panelization** with hidden-seam guillotine routing. ✅
 - **Phase 5 — Nesting + boards + part IDs** (rectpack v1). ✅
 - **Phase 6 — Assembly guide + cut-path optimization.** ✅
+- **Browser GUI** — FastAPI + no-build front-end over the same core. ✅
+- **Phase 7/8 — Fictional maps:** terrain-bundle contract + flat-coordinate core
+  (`normalize_layers`, icons, water insets), and Tier 1/2/3 + Azgaar adapters. ✅
 
 **v2 / future:** true irregular (no-fit-polygon) nesting to cut sheet waste;
-puzzle-tab seam joints; a web GUI over the same core library.
+puzzle-tab seam joints; ML depth-assist and OCR/SAM extras for Tier 3.
