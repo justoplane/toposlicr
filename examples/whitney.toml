@@ -1,0 +1,40 @@
+# Example project: Mt. Whitney area, Sierra Nevada (US).
+# Run: toposlicr scale examples/whitney.toml --min-elev 2500 --max-elev 4421
+
+[region]
+bbox = [-118.35, 36.52, -118.20, 36.62]   # W, S, E, N
+dem = "USGS10m"
+
+[physical]
+model_width_mm = 500
+ply_thickness_mm = 3.0
+exaggeration = 1.5            # or pin interval_m / layer_count instead
+base_datum = "auto"          # or an elevation in meters
+
+[machine]
+profile = "glowforge"
+bed_mm = [495, 279]
+margin_mm = 8
+kerf_mm = 0.15               # measured via calibration coupon (Phase 3)
+
+[machine.colors]
+cut = "#000000"
+score_registration = "#FF0000"
+score_hydro = "#0000FF"
+score_ids = "#00A0A0"
+engrave_fill = "#333333"
+
+[materials]
+default = "birch_3mm"
+water = "blue_acrylic_3mm"
+overrides = { "0-1" = "walnut_3mm" }
+
+[symbology]
+peaks = { min_prominence_m = 150, label_elevation = true }
+rivers = { min_stream_order = 3 }
+lakes = { min_area_km2 = 0.05, mode = "inset", fit_gap_mm = 0.1 }
+labels = { font = "Source Sans Pro", mode = "engrave_fill", cap_height_mm = 4 }
+
+[panelization]
+seam_margin_mm = 4
+seam_joint = "butt"          # "butt" | "puzzle"
