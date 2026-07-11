@@ -92,6 +92,45 @@ def scale_cmd(config_path: str, min_elev: float | None, max_elev: float | None,
     click.echo()
 
 
+@main.command("run")
+@click.argument("config_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", "out_dir", type=click.Path(file_okay=False),
+              default="output", show_default=True, help="Output directory.")
+@click.option("--dem-resolution", type=float, default=30.0, show_default=True,
+              help="Target DEM resolution in meters.")
+@click.option("--no-cache", is_flag=True, help="Bypass the on-disk DEM cache.")
+@click.option("--no-debug", is_flag=True, help="Skip preview + GeoJSON debug artifacts.")
+def run_cmd(config_path: str, out_dir: str, dem_resolution: float,
+            no_cache: bool, no_debug: bool) -> None:
+    """Run the full pipeline: bbox + config → laser-ready SVG layers."""
+    import os
+
+    from .pipeline import run_pipeline
+
+    cfg = _load(config_path)
+    for w in cfg.warnings:
+        click.secho(f"  config: {w}", fg="yellow")
+
+    try:
+        result = run_pipeline(
+            cfg, out_dir,
+            log=lambda m: click.secho(m, fg="cyan"),
+            dem_resolution_m=dem_resolution,
+            api_key=os.environ.get("OPENTOPOGRAPHY_API_KEY"),
+            use_cache=not no_cache,
+            write_debug=not no_debug,
+        )
+    except Exception as exc:  # surface pipeline failures cleanly
+        raise click.ClickException(f"{type(exc).__name__}: {exc}") from exc
+
+    for w in result.warnings:
+        click.secho(f"  ⚠ {w}", fg="yellow")
+    click.secho(
+        f"\n✓ {len(result.layer_svgs)} layer SVG(s) → {result.out_dir}/layers",
+        fg="green",
+    )
+
+
 @main.command("validate")
 @click.argument("config_path", type=click.Path(exists=True, dir_okay=False))
 def validate_cmd(config_path: str) -> None:

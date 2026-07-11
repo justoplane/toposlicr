@@ -47,6 +47,10 @@ class BBox:
     def mean_lat(self) -> float:
         return (self.south + self.north) / 2.0
 
+    @property
+    def mean_lon(self) -> float:
+        return (self.west + self.east) / 2.0
+
     def extent_m(self) -> tuple[float, float]:
         """Return the (width, height) of the box in meters.
 
@@ -59,3 +63,31 @@ class BBox:
         width_m = (self.east - self.west) * m_per_deg_lon
         height_m = (self.north - self.south) * m_per_deg_lat
         return width_m, height_m
+
+    def utm_epsg(self) -> int:
+        """EPSG code of the UTM zone containing the box center.
+
+        Northern-hemisphere zones are 326xx, southern 327xx. Reprojecting into
+        this zone gives true meters with minimal distortion at map scale.
+        """
+        zone = int((self.mean_lon + 180.0) // 6.0) + 1
+        zone = min(max(zone, 1), 60)
+        return (32600 if self.mean_lat >= 0 else 32700) + zone
+
+
+def is_in_usa(bbox: BBox) -> bool:
+    """Rough check whether a box lies fully within the contiguous US + AK/HI.
+
+    Used only to pick default data providers (3DEP/GNIS/NHD vs COP30/OSM); the
+    bounds are generous and a false negative merely falls back to global sources.
+    """
+    # Contiguous US, plus generous Alaska and Hawaii windows.
+    windows = (
+        (-125.0, 24.0, -66.5, 49.5),   # CONUS
+        (-170.0, 51.0, -129.0, 72.0),  # Alaska
+        (-161.0, 18.5, -154.0, 22.5),  # Hawaii
+    )
+    for w, s, e, n in windows:
+        if bbox.west >= w and bbox.east <= e and bbox.south >= s and bbox.north <= n:
+            return True
+    return False

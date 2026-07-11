@@ -76,10 +76,27 @@ class PhysicalConfig:
 
 
 @dataclass
+class ContourConfig:
+    """Geometry-cleanup knobs (plan Section 3). Lengths in model mm unless noted."""
+
+    smoothing_px: float = 1.5           # Gaussian sigma, in DEM pixels
+    simplify_tol_mm: float = 0.2        # Douglas-Peucker tolerance (below kerf)
+    chaikin_iterations: int = 1         # corner-cutting passes
+    min_feature_mm: float = 4.0         # drop plywood slivers/pinholes below this
+    close_radius_mm: float = 0.0        # morphological close to fuse near-touching blobs
+    ledge_margin_mm: float = 2.0        # min glue-ledge between stacked layers
+
+    @property
+    def min_area_mm2(self) -> float:
+        return self.min_feature_mm ** 2
+
+
+@dataclass
 class Config:
     region: RegionConfig
     physical: PhysicalConfig
     machine: MachineProfile = field(default_factory=MachineProfile)
+    contour: ContourConfig = field(default_factory=ContourConfig)
     # Later-phase blocks kept as raw dicts for now (with defaults), typed later.
     materials: dict[str, Any] = field(default_factory=dict)
     symbology: dict[str, Any] = field(default_factory=dict)
@@ -92,6 +109,7 @@ _KNOWN_SECTIONS = {
     "region",
     "physical",
     "machine",
+    "contour",
     "materials",
     "symbology",
     "panelization",
@@ -168,6 +186,20 @@ def _parse_physical(raw: dict[str, Any], warnings: list[str]) -> PhysicalConfig:
     return phys
 
 
+def _parse_contour(raw: dict[str, Any], warnings: list[str]) -> ContourConfig:
+    cc = ContourConfig()
+    fields = {
+        "smoothing_px": float, "simplify_tol_mm": float, "chaikin_iterations": int,
+        "min_feature_mm": float, "close_radius_mm": float, "ledge_margin_mm": float,
+    }
+    for key, val in raw.items():
+        if key in fields:
+            setattr(cc, key, fields[key](val))
+        else:
+            warnings.append(f"[contour] unknown key '{key}' ignored")
+    return cc
+
+
 def parse_config(data: dict[str, Any], source_path: Path | None = None) -> Config:
     """Build a ``Config`` from an already-parsed TOML mapping."""
     warnings: list[str] = []
@@ -194,11 +226,13 @@ def parse_config(data: dict[str, Any], source_path: Path | None = None) -> Confi
 
     physical = _parse_physical(data["physical"], warnings)
     machine = _parse_machine(data.get("machine", {}), warnings)
+    contour = _parse_contour(data.get("contour", {}), warnings)
 
     return Config(
         region=region,
         physical=physical,
         machine=machine,
+        contour=contour,
         materials=dict(data.get("materials", {})),
         symbology=dict(data.get("symbology", {})),
         panelization=dict(data.get("panelization", {})),
