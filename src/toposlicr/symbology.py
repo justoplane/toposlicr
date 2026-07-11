@@ -51,7 +51,8 @@ class LayerSymbology:
     visible_band: BaseGeometry
     rivers: BaseGeometry                     # clipped score lines (model mm)
     lake_outlines: BaseGeometry              # score-mode lake boundaries
-    lakes: list[GeoFeature] = field(default_factory=list)  # for inset mode (Phase 3)
+    lakes: list[GeoFeature] = field(default_factory=list)  # source features
+    lake_polys: list[BaseGeometry] = field(default_factory=list)  # model-mm polys (Phase 3)
 
 
 @dataclass
@@ -99,6 +100,7 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
     rivers_by_layer: dict[int, list[BaseGeometry]] = {k: [] for k in bands}
     lake_outlines_by_layer: dict[int, list[BaseGeometry]] = {k: [] for k in bands}
     lakes_by_layer: dict[int, list[GeoFeature]] = {k: [] for k in bands}
+    lake_polys_by_layer: dict[int, list[BaseGeometry]] = {k: [] for k in bands}
     label_requests: list[LabelRequest] = []
     sym = cfg.symbology
 
@@ -117,6 +119,7 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
         elif feat.feature_type is FeatureType.LAKE:
             k = _assign_lake_layer(geom_m, bands, model)
             lakes_by_layer[k].append(feat)
+            lake_polys_by_layer[k].append(geom_m)
             if sym.lakes.mode == "score":
                 outline = geom_m.boundary.intersection(bands[k])
                 if not outline.is_empty:
@@ -153,6 +156,7 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
             rivers=_merge_lines(rivers_by_layer[k]),
             lake_outlines=_merge_lines(lake_outlines_by_layer[k]),
             lakes=lakes_by_layer[k],
+            lake_polys=lake_polys_by_layer[k],
         )
     return SymbologyResult(per_layer=per_layer, labels=report, warnings=warnings)
 

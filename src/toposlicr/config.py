@@ -130,15 +130,22 @@ class SymbologyConfig:
 
 
 @dataclass
+class PanelizationConfig:
+    seam_margin_mm: float = 4.0          # erode the hidden corridor so seams don't peek
+    seam_joint: str = "butt"             # "butt" | "puzzle"
+    tab_size_mm: float | None = None     # puzzle tab size; defaults to ~3× thickness
+
+
+@dataclass
 class Config:
     region: RegionConfig
     physical: PhysicalConfig
     machine: MachineProfile = field(default_factory=MachineProfile)
     contour: ContourConfig = field(default_factory=ContourConfig)
     symbology: SymbologyConfig = field(default_factory=SymbologyConfig)
-    # Later-phase blocks kept as raw dicts for now (with defaults), typed later.
+    panelization: PanelizationConfig = field(default_factory=PanelizationConfig)
+    # Materials stays a light dict (default/water/overrides map); resolved in parts.py.
     materials: dict[str, Any] = field(default_factory=dict)
-    panelization: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     source_path: Path | None = None
 
@@ -295,6 +302,8 @@ def parse_config(data: dict[str, Any], source_path: Path | None = None) -> Confi
     machine = _parse_machine(data.get("machine", {}), warnings)
     contour = _parse_contour(data.get("contour", {}), warnings)
     symbology = _parse_symbology(data.get("symbology", {}), warnings)
+    panelization = PanelizationConfig()
+    _fill_dataclass(panelization, data.get("panelization", {}), "panelization", warnings)
 
     return Config(
         region=region,
@@ -302,8 +311,8 @@ def parse_config(data: dict[str, Any], source_path: Path | None = None) -> Confi
         machine=machine,
         contour=contour,
         symbology=symbology,
+        panelization=panelization,
         materials=dict(data.get("materials", {})),
-        panelization=dict(data.get("panelization", {})),
         warnings=warnings,
         source_path=source_path,
     )
