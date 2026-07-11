@@ -172,6 +172,9 @@ def _bundle_symbology(model, bundle, cfg, warnings: list[str]) -> SymbologyResul
     for poly in bundle.water_polygons():
         coll.add(GeoFeature(feature_type=FeatureType.LAKE, geometry=poly,
                             importance=poly.area))
+    for line, name in bundle.rivers():
+        coll.add(GeoFeature(feature_type=FeatureType.RIVER, geometry=line,
+                            name=name, importance=5))
     coll.epsg = FLAT_EPSG
     symbology = build_symbology(model, coll, cfg)
     warnings.extend(symbology.warnings)

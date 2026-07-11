@@ -168,6 +168,107 @@ def coupon_cmd(config_path: str, out_path: str, start: float, stop: float,
     click.secho(f"✓ coupon with {len(offsets)} offsets → {path}", fg="green")
 
 
+@main.group("adapt")
+def adapt() -> None:
+    """Convert a fictional source into a terrain bundle (needs the 'fictional' extra)."""
+
+
+def _adapter_error(exc: ImportError) -> click.ClickException:
+    return click.ClickException(
+        f"missing dependency for this adapter ({exc}); install with: "
+        "uv sync --extra fictional")
+
+
+@adapt.command("mesh")
+@click.argument("mesh_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", "out_dir", default="world.terrainbundle", show_default=True)
+@click.option("--cells-across", default=1000, show_default=True, type=int)
+@click.option("--up-axis", default="auto", show_default=True)
+@click.option("--pedestal-clip", default="auto", show_default=True)
+@click.option("--supersample", default=2, show_default=True, type=int)
+@click.option("--no-water", is_flag=True, help="Skip flat-region water candidates.")
+def adapt_mesh(mesh_path, out_dir, cells_across, up_axis, pedestal_clip,
+               supersample, no_water) -> None:
+    """Tier 2: 3D mesh (STL/OBJ/glTF) → heightfield bundle."""
+    try:
+        from .adapters.mesh import mesh_to_bundle
+    except ImportError as exc:
+        raise _adapter_error(exc) from exc
+    path = mesh_to_bundle(mesh_path, out_dir, up_axis=up_axis,
+                          pedestal_clip=pedestal_clip, cells_across=cells_across,
+                          supersample=supersample, water_candidates=not no_water)
+    click.secho(f"✓ bundle → {path}", fg="green")
+
+
+@adapt.command("art")
+@click.argument("art_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", "out_dir", default="world.terrainbundle", show_default=True)
+@click.option("--class-overlay", type=click.Path(exists=True), default=None,
+              help="Painted terrain-class overlay PNG (red=mtn, orange=hill, yellow=plateau).")
+@click.option("--adjust", "adjustment_layer", type=click.Path(exists=True), default=None,
+              help="Mid-gray height-adjustment layer PNG.")
+@click.option("--segmentation", "water_segmentation", default="auto", show_default=True)
+@click.option("--cells-across", default=1000, show_default=True, type=int)
+@click.option("--layers", "normalize_layers", default=12, show_default=True, type=int)
+@click.option("--ocr", is_flag=True, help="Lift place names via OCR (needs OCR extra).")
+def adapt_art(art_path, out_dir, class_overlay, adjustment_layer, water_segmentation,
+              cells_across, normalize_layers, ocr) -> None:
+    """Tier 3: 2D map artwork → synthesized heightfield bundle."""
+    try:
+        from .adapters.art import art_to_bundle
+    except ImportError as exc:
+        raise _adapter_error(exc) from exc
+    path = art_to_bundle(art_path, out_dir, class_overlay=class_overlay,
+                         adjustment_layer=adjustment_layer,
+                         water_segmentation=water_segmentation,
+                         cells_across=cells_across, normalize_layers=normalize_layers,
+                         ocr=ocr)
+    click.secho(f"✓ bundle → {path}", fg="green")
+
+
+@adapt.command("azgaar")
+@click.argument("cells_geojson", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", "out_dir", default="world.terrainbundle", show_default=True)
+@click.option("--rivers", "rivers_geojson", type=click.Path(exists=True), default=None)
+@click.option("--burgs", type=click.Path(exists=True), default=None)
+@click.option("--cells-across", default=1000, show_default=True, type=int)
+@click.option("--water-threshold", default=20, show_default=True, type=int)
+def adapt_azgaar(cells_geojson, out_dir, rivers_geojson, burgs, cells_across,
+                 water_threshold) -> None:
+    """Azgaar FMG cell export (heights + settlements) → bundle."""
+    try:
+        from .adapters.azgaar import azgaar_to_bundle
+    except ImportError as exc:
+        raise _adapter_error(exc) from exc
+    path = azgaar_to_bundle(cells_geojson, out_dir, rivers_geojson=rivers_geojson,
+                            burgs=burgs, cells_across=cells_across,
+                            water_threshold=water_threshold)
+    click.secho(f"✓ bundle → {path}", fg="green")
+
+
+@adapt.command("botw")
+@click.option("-o", "--out", "out_dir", default="world.terrainbundle", show_default=True)
+@click.option("--heightmap", "heightmap_png", type=click.Path(exists=True), default=None,
+              help="Pre-extracted 16-bit heightmap PNG (BotWHeightMapConverter output).")
+@click.option("--terrain-dir", type=click.Path(exists=True), default=None,
+              help="Folder of raw .hght tiles (partial support; prefer --heightmap).")
+@click.option("--objmap", "objmap_geojson", type=click.Path(exists=True), default=None,
+              help="ZeldaMods objmap GeoJSON of named locations.")
+@click.option("--water", "water_png", type=click.Path(exists=True), default=None)
+@click.option("--units-per-pixel", default=1.0, show_default=True, type=float)
+def adapt_botw(out_dir, heightmap_png, terrain_dir, objmap_geojson, water_png,
+               units_per_pixel) -> None:
+    """Tier 1: Breath of the Wild (user-supplied files) → bundle."""
+    try:
+        from .adapters.botw import botw_to_bundle
+    except ImportError as exc:
+        raise _adapter_error(exc) from exc
+    path = botw_to_bundle(out_dir, heightmap_png=heightmap_png, terrain_dir=terrain_dir,
+                          objmap_geojson=objmap_geojson, water_png=water_png,
+                          units_per_pixel=units_per_pixel)
+    click.secho(f"✓ bundle → {path}", fg="green")
+
+
 @main.command("serve")
 @click.option("--host", default="127.0.0.1", show_default=True)
 @click.option("--port", default=8000, show_default=True, type=int)

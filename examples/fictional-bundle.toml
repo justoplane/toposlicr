@@ -1,0 +1,41 @@
+# Fictional map from a terrain bundle (no bbox, no CRS — flat world coords).
+#
+# A *.terrainbundle directory is produced by one of the source adapters:
+#   toposlicr adapt mesh   world.stl        -o world.terrainbundle   # Tier 2
+#   toposlicr adapt art    map.png          -o world.terrainbundle   # Tier 3
+#   toposlicr adapt azgaar cells.geojson    -o world.terrainbundle   # Azgaar
+#   toposlicr adapt botw   --heightmap h.png --objmap objs.geojson ... # Tier 1
+#
+# then:  toposlicr run examples/fictional-bundle.toml -o output --name Mythwold
+
+[region]
+bundle = "world.terrainbundle"   # path to the bundle directory
+
+[physical]
+model_width_mm = 400
+ply_thickness_mm = 3.0
+# Fictional elevation units are meaningless, so drive vertical scale by layer
+# count, not fake meters. Percentile-clip trims anomalous spires so one tower
+# doesn't stretch every band.
+normalize_layers = 12
+clip_percentiles = [0.5, 99.5]
+
+[machine]
+profile = "glowforge"
+bed_mm = [495, 279]
+margin_mm = 8
+kerf_mm = 0.15
+
+[materials]
+default = "birch_3mm"
+water = "blue_acrylic_3mm"
+
+[symbology]
+# Water comes from the bundle's water.png; named features + icons from its
+# features.csv. No OSM / no network for fictional worlds.
+lakes = { min_area_km2 = 0.0, mode = "inset" }
+labels = { cap_height_mm = 4.0, icon_size_mm = 6.0 }
+
+[panelization]
+seam_margin_mm = 4
+seam_joint = "butt"

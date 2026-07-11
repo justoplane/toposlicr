@@ -95,6 +95,7 @@ class TerrainBundle:
     water: np.ndarray | None = None        # bool mask, same grid, True = water
     path: Path | None = None
     features_path: Path | None = None
+    rivers_path: Path | None = None        # optional rivers.geojson (world coords)
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -145,6 +146,30 @@ class TerrainBundle:
                 if feat is not None:
                     coll.add(feat)
         return coll
+
+    def rivers(self) -> list:
+        """River linework (world coords) from an optional ``rivers.geojson``.
+
+        features.csv is point-per-row, so real river polylines — which the core
+        scores per layer and which drive carving — travel in a separate GeoJSON
+        of LineString/MultiLineString features.
+        """
+        if not self.rivers_path or not self.rivers_path.is_file():
+            return []
+        from shapely.geometry import shape
+
+        data = json.loads(self.rivers_path.read_text())
+        feats = data.get("features", []) if isinstance(data, dict) else []
+        lines = []
+        for f in feats:
+            geom = f.get("geometry") if isinstance(f, dict) else None
+            if not geom:
+                continue
+            g = shape(geom)
+            name = (f.get("properties") or {}).get("name")
+            if g.geom_type in ("LineString", "MultiLineString") and not g.is_empty:
+                lines.append((g, name))
+        return lines
 
 
 def _row_to_feature(row: dict) -> GeoFeature | None:
@@ -200,8 +225,11 @@ def load_bundle(path: str | Path) -> TerrainBundle:
         water = wm > 0
 
     features_path = p / "features.csv"
-    return TerrainBundle(meta=meta, heightmap=heightmap, water=water, path=p,
-                         features_path=features_path if features_path.is_file() else None)
+    rivers_path = p / "rivers.geojson"
+    return TerrainBundle(
+        meta=meta, heightmap=heightmap, water=water, path=p,
+        features_path=features_path if features_path.is_file() else None,
+        rivers_path=rivers_path if rivers_path.is_file() else None)
 
 
 def read_gray(path: str | Path) -> np.ndarray:
