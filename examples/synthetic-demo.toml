@@ -1,0 +1,30 @@
+# Offline demo — runs with no network and no API key (synthetic terrain).
+# Try:  uv run toposlicr run examples/synthetic-demo.toml -o output --no-symbology
+#
+# The `synthetic` DEM provider generates deterministic Gaussian-hill terrain, so
+# the whole pipeline (contour → parts → panelize → nest → boards → guide) runs
+# end-to-end without touching the network. Drop `--no-symbology` only with a real
+# DEM source, since synthetic terrain has no OSM features.
+
+[region]
+bbox = [-118.35, 36.52, -118.20, 36.62]
+dem = "synthetic"
+
+[physical]
+model_width_mm = 300
+ply_thickness_mm = 3.0
+interval_m = 200
+
+[machine]
+profile = "glowforge"
+bed_mm = [495, 279]
+margin_mm = 8
+kerf_mm = 0.15
+
+[materials]
+default = "birch_3mm"
+overrides = { "0-1" = "walnut_3mm" }
+
+[panelization]
+seam_margin_mm = 4
+seam_joint = "butt"

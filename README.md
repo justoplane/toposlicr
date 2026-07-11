@@ -11,9 +11,10 @@ lakes, peaks, names) from georeferenced sources in the same coordinate system,
 so matching a symbol to its place on a slice is a coordinate transform instead
 of manual tracing. Everything downstream is 2D polygon math.
 
-> **Status: Phase 0.** Scale/exaggeration math and the config schema are in
-> place. DEM acquisition, contouring, symbology, panelization, nesting and SVG
-> output land in later phases (see [the plan](#build-phases)).
+> **Status: end-to-end.** All seven pipeline stages are implemented — one
+> command takes a bounding box to laser-ready nested cut boards plus an assembly
+> guide. Irregular (no-fit-polygon) nesting is the one v2 item; v1 uses
+> rectangular bin-packing (see [build phases](#build-phases)).
 
 ## Architecture
 
@@ -26,7 +27,7 @@ goal) without restructuring.
 config.toml
    ▼
 [1] Data acquisition (DEM + vector features)      → cached GeoTIFF / GeoJSON
-[2] Projection + scale/exaggeration math          → layer elevation bands   ← Phase 0 (here)
+[2] Projection + scale/exaggeration math          → layer elevation bands
 [3] Contour extraction + geometry cleanup         → per-layer polygons
 [4] Symbology (water, rivers, labels, scores)
 [5] Panelization (split oversized layers)
@@ -45,24 +46,45 @@ uv sync --extra dev      # create venv + install toposlicr and dev tools
 ## Usage
 
 ```bash
-# Report scale, exaggeration, contour interval and layer count for a project:
+# Full pipeline: bbox + config → nested laser-ready boards + assembly guide.
+uv run toposlicr run examples/whitney.toml -o output --name Whitney
+
+# Just the scale/exaggeration/layer-count report (no data fetch):
 uv run toposlicr scale examples/whitney.toml --min-elev 2500 --max-elev 4421
 
-# Validate a config without running anything:
+# Validate a config; generate a press-fit calibration coupon:
 uv run toposlicr validate examples/whitney.toml
+uv run toposlicr coupon examples/whitney.toml -o coupon.svg
 ```
 
-The scale command solves the relationship between physical scale, vertical
-exaggeration and ply thickness three ways — pin any one of `exaggeration`,
-`interval_m` or `layer_count` in `[physical]` and the rest is derived:
+`run` writes, under the output directory:
 
 ```
-S = model_width_mm / (real_width_m × 1000)     # physical scale, 1:N
-interval_real_m = ply_thickness_mm / (S × E)   # elevation covered by one layer
+output/
+  layers/layer_NN.svg        one SVG per layer (cut + registration + symbology)
+  boards/board_MAT_NN.svg    nested cut boards, grouped by material
+  assembly_guide.html        exploded stack, board index, material + acrylic lists
+  features.csv               editable feature selection (re-run to apply edits)
+  labels.json                editable label positions (manual-nudge loop)
+  preview.svg, debug/*.geojson   non-blocking debug artifacts
 ```
 
-Elevation range (`--min-elev` / `--max-elev`) is provided manually for now; it
-is auto-detected from the DEM once Phase 1 lands.
+DEM source is chosen by `[region].dem`: `auto` (US → 3DEP, else COP30, with an
+OpenTopography key), the keyless `terrarium` (AWS terrain tiles), `synthetic`
+(offline), or an explicit dataset id. Set `OPENTOPOGRAPHY_API_KEY` to use
+OpenTopography. Results are cached under `cache/`.
+
+The scale relationship (pin any one of `exaggeration`, `interval_m` or
+`layer_count` in `[physical]`; the rest is derived):
+
+```
+S = model_width_mm / (real_width_m × 1000)          # physical scale, 1:N
+interval_real_m = ply_thickness_mm / (S × E × 1000) # elevation covered by one layer
+```
+
+Colors map to laser operations via the machine profile (`[machine.colors]`):
+black cut, red registration score, blue hydro score, teal part-ID score, filled
+grey label engraving — the Glowforge/color-as-operation convention.
 
 ## Development
 
@@ -73,13 +95,17 @@ uv run ruff check .  # lint
 
 ## Build phases
 
-Each phase is independently useful:
+All phases implemented:
 
-- **Phase 0 — Scale calculator + config schema.** ← current
-- **Phase 1 — Core slicer:** DEM fetch → cleaned layer polygons → per-layer SVGs
-  with cut outlines + registration scores.
-- **Phase 2 — Symbology:** rivers, lake outlines, labels, `features.csv` loop.
-- **Phase 3 — Acrylic insets** + kerf-calibration coupon generator.
-- **Phase 4 — Panelization** with hidden-seam routing.
-- **Phase 5 — Nesting + boards + part IDs.**
-- **Phase 6 — Assembly guide + cut-path optimization.**
+- **Phase 0 — Scale calculator + config schema.** ✅
+- **Phase 1 — Core slicer:** DEM fetch → cleaned nested layer polygons →
+  per-layer SVGs with cut outlines + registration scores. ✅
+- **Phase 2 — Symbology:** rivers, lake outlines, filled-font labels,
+  `features.csv` curation loop. ✅
+- **Phase 3 — Acrylic insets** (flush press-fit) + calibration coupon. ✅
+- **Phase 4 — Panelization** with hidden-seam guillotine routing. ✅
+- **Phase 5 — Nesting + boards + part IDs** (rectpack v1). ✅
+- **Phase 6 — Assembly guide + cut-path optimization.** ✅
+
+**v2 / future:** true irregular (no-fit-polygon) nesting to cut sheet waste;
+puzzle-tab seam joints; a web GUI over the same core library.
