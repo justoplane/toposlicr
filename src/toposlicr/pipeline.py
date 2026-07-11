@@ -13,13 +13,19 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .acrylic import apply_acrylic
+from .boards import render_boards
 from .config import Config, load_config
 from .dem.base import DemRaster
 from .dem.cache import resolve_dem
 from .features.acquire import fetch_features
 from .features.select import resolve_features
 from .geo import BBox
+from .guide import write_assembly_guide
 from .layers import LayerModel, build_layer_model
+from .nest import nest_parts
+from .panelize import panelize_parts
+from .parts import Board, Part, build_parts_from_model
 from .render import render_composite_preview, render_layer_svgs, write_layer_geojson
 from .symbology import SymbologyResult, build_symbology
 
@@ -38,7 +44,11 @@ class PipelineResult:
     model: LayerModel
     out_dir: Path
     symbology: SymbologyResult | None = None
+    parts: list[Part] = field(default_factory=list)
+    boards: list[Board] = field(default_factory=list)
     layer_svgs: list[Path] = field(default_factory=list)
+    board_svgs: list[Path] = field(default_factory=list)
+    guide_path: Path | None = None
     debug_artifacts: list[Path] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -46,14 +56,21 @@ class PipelineResult:
 def run_pipeline(cfg: Config, out_dir: str | Path, *, log: Logger = _noop,
                  dem_resolution_m: float = 30.0, api_key: str | None = None,
                  use_cache: bool = True, write_debug: bool = True,
-                 fetch_symbology: bool = True) -> PipelineResult:
-    """Run the implemented pipeline stages and write outputs to ``out_dir``."""
+                 fetch_symbology: bool = True, panelize: bool = True,
+                 nest: bool = True, project_name: str = "toposlicr",
+                 optimize: bool = True) -> PipelineResult:
+    """Run the full pipeline end-to-end and write outputs to ``out_dir``.
+
+    Stages: DEM → layer model → symbology → per-layer SVGs → parts (acrylic +
+    panelization) → nested cut boards → assembly guide. Board nesting can be
+    disabled to stop at per-layer SVGs.
+    """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     bbox = cfg.region.bbox
 
     # Stage 1 — data acquisition.
-    log(f"[1/3] fetching DEM ({cfg.region.dem}) for {bbox_str(bbox)} …")
+    log(f"[1/6] fetching DEM ({cfg.region.dem}) for {bbox_str(bbox)} …")
     dem: DemRaster = resolve_dem(
         cfg.region.dem, bbox, dem_resolution_m,
         api_key=api_key, cache_dir=out.parent / "cache" / "dem", use_cache=use_cache,
@@ -62,7 +79,7 @@ def run_pipeline(cfg: Config, out_dir: str | Path, *, log: Logger = _noop,
         f"elevation {dem.elevation_range()[0]:.0f}–{dem.elevation_range()[1]:.0f} m")
 
     # Stages 2–3 — projection/scale + contouring into the nested layer model.
-    log("[2/4] building layer model (project → scale → contour) …")
+    log("[2/6] building layer model (project → scale → contour) …")
     model = build_layer_model(dem, cfg, bbox)
     log(f"      {model.layer_count} layers, interval {model.interval_m:.0f} m, "
         f"scale {model.scale.scale_label()}, exaggeration {model.scale.exaggeration:.2f}×")
@@ -71,11 +88,21 @@ def run_pipeline(cfg: Config, out_dir: str | Path, *, log: Logger = _noop,
     warnings = list(model.warnings)
     symbology: SymbologyResult | None = None
     if fetch_symbology:
+        log("[3/6] fetching OSM features + building symbology …")
         symbology = _run_symbology(model, cfg, bbox, out, log, use_cache, warnings)
 
-    # Output — per-layer SVGs (cut + registration + symbology).
-    log("[4/4] rendering per-layer SVGs …")
+    # Per-layer SVGs (cut + registration + symbology) — always emitted.
+    log("[4/6] rendering per-layer SVGs …")
     layer_svgs = render_layer_svgs(model, cfg, out / "layers", symbology)
+
+    # Stages 5–6 — parts (acrylic insets + panelization) → nested boards → guide.
+    parts: list[Part] = []
+    boards: list[Board] = []
+    board_svgs: list[Path] = []
+    guide_path: Path | None = None
+    if nest:
+        parts, boards, board_svgs, guide_path = _run_layout(
+            model, symbology, cfg, out, log, warnings, project_name, panelize, optimize)
 
     debug: list[Path] = []
     if write_debug:
@@ -84,8 +111,34 @@ def run_pipeline(cfg: Config, out_dir: str | Path, *, log: Logger = _noop,
 
     log(f"done → {out}")
     return PipelineResult(config=cfg, model=model, out_dir=out, symbology=symbology,
-                          layer_svgs=layer_svgs, debug_artifacts=debug,
-                          warnings=warnings)
+                          parts=parts, boards=boards, layer_svgs=layer_svgs,
+                          board_svgs=board_svgs, guide_path=guide_path,
+                          debug_artifacts=debug, warnings=warnings)
+
+
+def _run_layout(model, symbology, cfg, out: Path, log: Logger, warnings: list[str],
+                project_name: str, panelize: bool, optimize: bool):
+    """Parts → acrylic → panelization → nesting → boards + guide."""
+    log("[5/6] building parts (acrylic insets + panelization) …")
+    parts = build_parts_from_model(model, symbology, cfg)
+    if panelize:
+        parts = panelize_parts(parts, model, cfg)
+    if symbology is not None:
+        parts, acr_warnings = apply_acrylic(parts, model, symbology, cfg)
+        warnings.extend(acr_warnings)
+    log(f"      {len(parts)} parts "
+        f"({sum(1 for p in parts if p.kind == 'acrylic')} acrylic)")
+
+    log("[6/6] nesting parts onto cut boards …")
+    boards = nest_parts(parts, cfg)
+    board_svgs = render_boards(boards, cfg, out / "boards", project_name=project_name,
+                              optimize=optimize)
+    log(f"      {len(boards)} boards across "
+        f"{len({b.material for b in boards})} material(s)")
+
+    guide_path = write_assembly_guide(model, boards, cfg, out / "assembly_guide.html",
+                                      project_name=project_name)
+    return parts, boards, board_svgs, guide_path
 
 
 def _run_symbology(model, cfg, bbox, out: Path, log: Logger, use_cache: bool,

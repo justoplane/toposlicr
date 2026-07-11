@@ -102,10 +102,18 @@ def scale_cmd(config_path: str, min_elev: float | None, max_elev: float | None,
 @click.option("--no-debug", is_flag=True, help="Skip preview + GeoJSON debug artifacts.")
 @click.option("--no-symbology", is_flag=True,
               help="Skip OSM features (rivers/lakes/labels); terrain only.")
+@click.option("--no-nest", is_flag=True,
+              help="Stop at per-layer SVGs; skip parts/boards/guide.")
+@click.option("--no-panelize", is_flag=True,
+              help="Do not split oversized layers into bed-sized parts.")
+@click.option("--name", "project_name", default=None,
+              help="Project name for headers/guide (defaults to config filename).")
 def run_cmd(config_path: str, out_dir: str, dem_resolution: float,
-            no_cache: bool, no_debug: bool, no_symbology: bool) -> None:
-    """Run the full pipeline: bbox + config → laser-ready SVG layers."""
+            no_cache: bool, no_debug: bool, no_symbology: bool, no_nest: bool,
+            no_panelize: bool, project_name: str | None) -> None:
+    """Run the full pipeline: bbox + config → laser-ready nested cut boards."""
     import os
+    from pathlib import Path
 
     from .pipeline import run_pipeline
 
@@ -122,16 +130,42 @@ def run_cmd(config_path: str, out_dir: str, dem_resolution: float,
             use_cache=not no_cache,
             write_debug=not no_debug,
             fetch_symbology=not no_symbology,
+            nest=not no_nest,
+            panelize=not no_panelize,
+            project_name=project_name or Path(config_path).stem,
         )
     except Exception as exc:  # surface pipeline failures cleanly
         raise click.ClickException(f"{type(exc).__name__}: {exc}") from exc
 
     for w in result.warnings:
         click.secho(f"  ⚠ {w}", fg="yellow")
-    click.secho(
-        f"\n✓ {len(result.layer_svgs)} layer SVG(s) → {result.out_dir}/layers",
-        fg="green",
-    )
+    click.secho(f"\n✓ {len(result.layer_svgs)} layer SVG(s) → {result.out_dir}/layers",
+                fg="green")
+    if result.boards:
+        click.secho(f"✓ {len(result.boards)} cut board(s) → {result.out_dir}/boards",
+                    fg="green")
+    if result.guide_path:
+        click.secho(f"✓ assembly guide → {result.guide_path}", fg="green")
+
+
+@main.command("coupon")
+@click.argument("config_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", "out_path", type=click.Path(dir_okay=False),
+              default="coupon.svg", show_default=True)
+@click.option("--start", type=float, default=-0.05, show_default=True,
+              help="First press-fit offset (mm).")
+@click.option("--stop", type=float, default=0.15, show_default=True,
+              help="Last press-fit offset (mm).")
+@click.option("--step", type=float, default=0.02, show_default=True)
+def coupon_cmd(config_path: str, out_path: str, start: float, stop: float,
+               step: float) -> None:
+    """Generate a press-fit calibration coupon SVG for this machine/material."""
+    from .coupon import offset_series, write_coupon
+
+    cfg = _load(config_path)
+    offsets = offset_series(start, stop, step)
+    path = write_coupon(cfg, out_path, offsets=offsets)
+    click.secho(f"✓ coupon with {len(offsets)} offsets → {path}", fg="green")
 
 
 @main.command("validate")

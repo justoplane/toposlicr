@@ -16,8 +16,12 @@ from .svg import SvgDocument
 
 
 def render_boards(boards: list[Board], cfg: Config, out_dir: str | Path,
-                  project_name: str = "toposlicr") -> list[Path]:
-    """Write one SVG per board; return the written paths."""
+                  project_name: str = "toposlicr", optimize: bool = True) -> list[Path]:
+    """Write one SVG per board; return the written paths.
+
+    When ``optimize`` is set, each board's paths are reordered to minimize laser
+    travel (the vpype-style post-pass) before writing.
+    """
     out = Path(out_dir)
     colors = cfg.machine.colors
     paths: list[Path] = []
@@ -37,6 +41,9 @@ def render_boards(boards: list[Board], cfg: Config, out_dir: str | Path,
                 else:
                     doc.add_score(geom, color, label=role)
         _add_header(doc, board, cfg, project_name)
+        if optimize:
+            from .optimize import optimize_document
+            optimize_document(doc)
         name = f"board_{_safe(board.material)}_{board.index:02d}.svg"
         paths.append(doc.save(out / name))
     return paths
