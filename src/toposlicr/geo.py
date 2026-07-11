@@ -75,6 +75,22 @@ class BBox:
         return (32600 if self.mean_lat >= 0 else 32700) + zone
 
 
+def reproject_geom(geom, src_epsg: int, dst_epsg: int):
+    """Reproject a Shapely geometry between EPSG codes (e.g. 4326 → UTM).
+
+    Imported lazily so modules that never touch vector features don't pull in
+    pyproj at import time.
+    """
+    if src_epsg == dst_epsg:
+        return geom
+    from pyproj import Transformer
+    from shapely.ops import transform
+
+    transformer = Transformer.from_crs(f"EPSG:{src_epsg}", f"EPSG:{dst_epsg}",
+                                       always_xy=True)
+    return transform(transformer.transform, geom)
+
+
 def is_in_usa(bbox: BBox) -> bool:
     """Rough check whether a box lies fully within the contiguous US + AK/HI.
 

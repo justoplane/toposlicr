@@ -92,14 +92,52 @@ class ContourConfig:
 
 
 @dataclass
+class PeaksConfig:
+    min_prominence_m: float = 150.0    # applied where OSM/GNIS supplies prominence
+    min_elevation_m: float | None = None
+    label_elevation: bool = True
+    max_count: int | None = None       # keep the N highest, None = no cap
+
+
+@dataclass
+class RiversConfig:
+    min_stream_order: int = 3           # OSM waterway class → pseudo stream order
+    widen_major: bool = False           # engrave major rivers as thin polygons
+
+
+@dataclass
+class LakesConfig:
+    min_area_km2: float = 0.05
+    mode: str = "score"                 # "score" | "inset"
+    fit_gap_mm: float = 0.1             # acrylic press-fit gap (Phase 3)
+
+
+@dataclass
+class LabelsConfig:
+    font: str = "DejaVu Sans"
+    mode: str = "engrave_fill"          # "engrave_fill" | "score"
+    cap_height_mm: float = 4.0
+    append_elevation: bool = True
+
+
+@dataclass
+class SymbologyConfig:
+    peaks: PeaksConfig = field(default_factory=PeaksConfig)
+    rivers: RiversConfig = field(default_factory=RiversConfig)
+    lakes: LakesConfig = field(default_factory=LakesConfig)
+    labels: LabelsConfig = field(default_factory=LabelsConfig)
+    include_places: bool = True
+
+
+@dataclass
 class Config:
     region: RegionConfig
     physical: PhysicalConfig
     machine: MachineProfile = field(default_factory=MachineProfile)
     contour: ContourConfig = field(default_factory=ContourConfig)
+    symbology: SymbologyConfig = field(default_factory=SymbologyConfig)
     # Later-phase blocks kept as raw dicts for now (with defaults), typed later.
     materials: dict[str, Any] = field(default_factory=dict)
-    symbology: dict[str, Any] = field(default_factory=dict)
     panelization: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     source_path: Path | None = None
@@ -200,6 +238,35 @@ def _parse_contour(raw: dict[str, Any], warnings: list[str]) -> ContourConfig:
     return cc
 
 
+def _fill_dataclass(obj: Any, raw: dict[str, Any], where: str,
+                    warnings: list[str]) -> None:
+    """Set known dataclass fields from a raw table; warn on unknown keys."""
+    from dataclasses import fields as dc_fields
+
+    known = {f.name: f.type for f in dc_fields(obj)}
+    for key, val in raw.items():
+        if key in known:
+            setattr(obj, key, val)
+        else:
+            warnings.append(f"[{where}] unknown key '{key}' ignored")
+
+
+def _parse_symbology(raw: dict[str, Any], warnings: list[str]) -> SymbologyConfig:
+    sym = SymbologyConfig()
+    subtables = {"peaks": sym.peaks, "rivers": sym.rivers,
+                 "lakes": sym.lakes, "labels": sym.labels}
+    for key, val in raw.items():
+        if key in subtables:
+            if not isinstance(val, dict):
+                raise ConfigError(f"[symbology] '{key}' must be a table")
+            _fill_dataclass(subtables[key], val, f"symbology.{key}", warnings)
+        elif key == "include_places":
+            sym.include_places = bool(val)
+        else:
+            warnings.append(f"[symbology] unknown key '{key}' ignored")
+    return sym
+
+
 def parse_config(data: dict[str, Any], source_path: Path | None = None) -> Config:
     """Build a ``Config`` from an already-parsed TOML mapping."""
     warnings: list[str] = []
@@ -227,14 +294,15 @@ def parse_config(data: dict[str, Any], source_path: Path | None = None) -> Confi
     physical = _parse_physical(data["physical"], warnings)
     machine = _parse_machine(data.get("machine", {}), warnings)
     contour = _parse_contour(data.get("contour", {}), warnings)
+    symbology = _parse_symbology(data.get("symbology", {}), warnings)
 
     return Config(
         region=region,
         physical=physical,
         machine=machine,
         contour=contour,
+        symbology=symbology,
         materials=dict(data.get("materials", {})),
-        symbology=dict(data.get("symbology", {})),
         panelization=dict(data.get("panelization", {})),
         warnings=warnings,
         source_path=source_path,

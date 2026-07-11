@@ -100,8 +100,10 @@ def scale_cmd(config_path: str, min_elev: float | None, max_elev: float | None,
               help="Target DEM resolution in meters.")
 @click.option("--no-cache", is_flag=True, help="Bypass the on-disk DEM cache.")
 @click.option("--no-debug", is_flag=True, help="Skip preview + GeoJSON debug artifacts.")
+@click.option("--no-symbology", is_flag=True,
+              help="Skip OSM features (rivers/lakes/labels); terrain only.")
 def run_cmd(config_path: str, out_dir: str, dem_resolution: float,
-            no_cache: bool, no_debug: bool) -> None:
+            no_cache: bool, no_debug: bool, no_symbology: bool) -> None:
     """Run the full pipeline: bbox + config → laser-ready SVG layers."""
     import os
 
@@ -119,6 +121,7 @@ def run_cmd(config_path: str, out_dir: str, dem_resolution: float,
             api_key=os.environ.get("OPENTOPOGRAPHY_API_KEY"),
             use_cache=not no_cache,
             write_debug=not no_debug,
+            fetch_symbology=not no_symbology,
         )
     except Exception as exc:  # surface pipeline failures cleanly
         raise click.ClickException(f"{type(exc).__name__}: {exc}") from exc

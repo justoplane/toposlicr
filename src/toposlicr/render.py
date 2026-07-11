@@ -17,6 +17,11 @@ from shapely.geometry.base import BaseGeometry
 from .config import Config
 from .layers import LayerModel
 from .svg import SvgDocument
+from .symbology import (
+    SymbologyResult,
+    label_geometry_for_layer,
+    leader_geometry_for_layer,
+)
 
 
 def registration_score(model: LayerModel, k: int) -> BaseGeometry:
@@ -28,8 +33,14 @@ def registration_score(model: LayerModel, k: int) -> BaseGeometry:
     return above.boundary.intersection(here)
 
 
-def render_layer_svgs(model: LayerModel, cfg: Config, out_dir: str | Path) -> list[Path]:
-    """Write ``layer_{k}.svg`` for every layer; return the paths."""
+def render_layer_svgs(model: LayerModel, cfg: Config, out_dir: str | Path,
+                      symbology: SymbologyResult | None = None) -> list[Path]:
+    """Write ``layer_{k}.svg`` for every layer; return the paths.
+
+    Each layer carries: the cut outline, the registration score (layer above),
+    and — when symbology is supplied — river/lake score lines, label leader
+    lines, and filled label engraving.
+    """
     out = Path(out_dir)
     colors = cfg.machine.colors
     paths: list[Path] = []
@@ -40,6 +51,22 @@ def render_layer_svgs(model: LayerModel, cfg: Config, out_dir: str | Path) -> li
         reg = registration_score(model, layer.index)
         if not reg.is_empty:
             doc.add_score(reg, colors["score_registration"], label="score_registration")
+
+        if symbology is not None:
+            sym = symbology.for_layer(layer.index)
+            if sym is not None:
+                if not sym.rivers.is_empty:
+                    doc.add_score(sym.rivers, colors["score_hydro"], label="score_hydro")
+                if not sym.lake_outlines.is_empty:
+                    doc.add_score(sym.lake_outlines, colors["score_hydro"],
+                                  label="score_hydro")
+            leaders = leader_geometry_for_layer(symbology.labels, layer.index)
+            if not leaders.is_empty:
+                doc.add_score(leaders, colors["score_ids"], label="leader")
+            glyphs = label_geometry_for_layer(symbology.labels, layer.index)
+            if not glyphs.is_empty:
+                doc.add_engrave(glyphs, colors["engrave_fill"], label="engrave_fill")
+
         paths.append(doc.save(out / f"layer_{layer.index:02d}.svg"))
     return paths
 
