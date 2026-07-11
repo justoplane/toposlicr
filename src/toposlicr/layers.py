@@ -47,8 +47,9 @@ class LayerModel:
     model_width_mm: float
     model_height_mm: float
     scale: ScaleResult
-    utm_epsg: int
+    utm_epsg: int                       # 0 when flat (fictional)
     world_to_model: tuple[float, float, float, float, float, float]
+    flat: bool = False                  # fictional bundle → no CRS / no reprojection
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -70,19 +71,41 @@ def _world_to_model_matrix(x_min: float, y_min: float, k_mm_per_m: float
             -x_min * k_mm_per_m, -y_min * k_mm_per_m)
 
 
-def build_layer_model(dem_geographic: DemRaster, cfg: Config, bbox: BBox) -> LayerModel:
-    """Build the nested layer stack from a geographic DEM and project config."""
+def build_layer_model(dem_geographic: DemRaster, cfg: Config,
+                      bbox: BBox | None = None) -> LayerModel:
+    """Build the nested layer stack from a DEM (real or fictional) and config.
+
+    Real DEMs (lon/lat) are reprojected to UTM. Fictional data from a terrain
+    bundle arrives flat (``crs == FLAT_CRS``); its units are already linear world
+    units, so reprojection is skipped and everything downstream is identical.
+    """
+    from .dem.base import FLAT_CRS
+
     warnings: list[str] = []
+    flat = dem_geographic.crs == FLAT_CRS
 
-    # 1. Reproject to the local UTM zone so horizontal units are true meters.
-    epsg = bbox.utm_epsg()
-    utm = dem_geographic.to_crs(f"EPSG:{epsg}")
+    # 1. Reproject real DEMs to the local UTM zone; fictional data stays flat.
+    if flat:
+        epsg = 0
+        utm = dem_geographic
+    else:
+        if bbox is None:
+            raise ValueError("a real-world DEM requires a bbox for UTM reprojection")
+        epsg = bbox.utm_epsg()
+        utm = dem_geographic.to_crs(f"EPSG:{epsg}")
 
-    # 2. Elevation range → base datum and solved scale.
-    zmin, zmax = utm.elevation_range()
+    # 2. Elevation range → base datum and solved scale. Optional percentile clip
+    #    keeps a lone spire from stretching every band (fictional-terrain hygiene).
+    if cfg.physical.clip_percentiles:
+        import numpy as np
+        valid = utm.masked().compressed()
+        lo, hi = cfg.physical.clip_percentiles
+        zmin, zmax = float(np.percentile(valid, lo)), float(np.percentile(valid, hi))
+    else:
+        zmin, zmax = utm.elevation_range()
     base = zmin if cfg.physical.base_datum == "auto" else float(cfg.physical.base_datum)
     if base > zmax:
-        raise ValueError(f"base datum {base} m is above the terrain max {zmax:.0f} m")
+        raise ValueError(f"base datum {base} is above the terrain max {zmax:.0f}")
 
     rows, cols = utm.shape
     left, top = utm.transform * (0, 0)
@@ -90,13 +113,15 @@ def build_layer_model(dem_geographic: DemRaster, cfg: Config, bbox: BBox) -> Lay
     utm_width = abs(right - left)
     utm_height = abs(top - bottom)
 
+    # normalize_layers (fictional) uses the same math as layer_count.
+    layer_count = cfg.physical.layer_count or cfg.physical.normalize_layers
     scale = solve_scale(
         model_width_mm=cfg.physical.model_width_mm,
         real_width_m=utm_width,
         ply_thickness_mm=cfg.physical.ply_thickness_mm,
         exaggeration=cfg.physical.exaggeration,
         interval_m=cfg.physical.interval_m,
-        layer_count=cfg.physical.layer_count,
+        layer_count=layer_count,
         base_elev_m=base,
         max_elev_m=zmax,
     )
@@ -171,6 +196,7 @@ def build_layer_model(dem_geographic: DemRaster, cfg: Config, bbox: BBox) -> Lay
         scale=scale,
         utm_epsg=epsg,
         world_to_model=matrix,
+        flat=flat,
         warnings=warnings,
     )
 

@@ -60,19 +60,30 @@ class MachineProfile:
 
 @dataclass
 class RegionConfig:
-    bbox: BBox
+    bbox: BBox | None = None          # real-world lon/lat box; None for fictional
     dem: str = "auto"
+    bundle: str | None = None         # path to a *.terrainbundle (fictional maps)
+
+    @property
+    def is_fictional(self) -> bool:
+        return self.bundle is not None
 
 
 @dataclass
 class PhysicalConfig:
     model_width_mm: float
     ply_thickness_mm: float = 3.0
-    # Exactly one of these three drives the scale solve (validated at load).
+    # Exactly one of these drives the scale solve (validated at load).
+    # normalize_layers is the fictional driver: "N layers across the range",
+    # same math as layer_count but signalling meaningless vertical units.
     exaggeration: float | None = 1.5
     interval_m: float | None = None
     layer_count: int | None = None
+    normalize_layers: int | None = None
     base_datum: str | float = "auto"
+    # Optional [lo, hi] percentile clip of the elevation range before banding,
+    # so a lone spire can't stretch every band (fictional-terrain hygiene).
+    clip_percentiles: list[float] | None = None
 
 
 @dataclass
@@ -118,6 +129,7 @@ class LabelsConfig:
     mode: str = "engrave_fill"          # "engrave_fill" | "score"
     cap_height_mm: float = 4.0
     append_elevation: bool = True
+    icon_size_mm: float = 5.0           # engraved icon-glyph size (fictional maps)
 
 
 @dataclass
@@ -201,18 +213,26 @@ def _parse_physical(raw: dict[str, Any], warnings: list[str]) -> PhysicalConfig:
     if "base_datum" in raw:
         bd = raw["base_datum"]
         phys.base_datum = bd if isinstance(bd, str) else float(bd)
+    if "clip_percentiles" in raw:
+        cp = raw["clip_percentiles"]
+        if not isinstance(cp, (list, tuple)) or len(cp) != 2:
+            raise ConfigError("[physical] clip_percentiles must be [low, high]")
+        phys.clip_percentiles = [float(cp[0]), float(cp[1])]
 
     # Determine which scale driver was pinned. Default to exaggeration=1.5 only
-    # when the user pinned none of the three.
-    drivers = {k: raw[k] for k in ("exaggeration", "interval_m", "layer_count") if k in raw}
+    # when the user pinned none. normalize_layers is the fictional-terrain driver.
+    driver_keys = ("exaggeration", "interval_m", "layer_count", "normalize_layers")
+    drivers = {k: raw[k] for k in driver_keys if k in raw}
     if len(drivers) > 1:
         raise ConfigError(
-            "[physical] pin only one of exaggeration / interval_m / layer_count; "
+            "[physical] pin only one of "
+            "exaggeration / interval_m / layer_count / normalize_layers; "
             f"got {sorted(drivers)}"
         )
     phys.exaggeration = None
     phys.interval_m = None
     phys.layer_count = None
+    phys.normalize_layers = None
     if not drivers:
         phys.exaggeration = 1.5
         warnings.append("[physical] no scale driver set; defaulting to exaggeration = 1.5")
@@ -220,11 +240,13 @@ def _parse_physical(raw: dict[str, Any], warnings: list[str]) -> PhysicalConfig:
         phys.exaggeration = float(drivers["exaggeration"])
     elif "interval_m" in drivers:
         phys.interval_m = float(drivers["interval_m"])
-    else:
+    elif "layer_count" in drivers:
         phys.layer_count = int(drivers["layer_count"])
+    else:
+        phys.normalize_layers = int(drivers["normalize_layers"])
 
-    known = {"model_width_mm", "ply_thickness_mm", "base_datum",
-             "exaggeration", "interval_m", "layer_count"}
+    known = {"model_width_mm", "ply_thickness_mm", "base_datum", "clip_percentiles",
+             "exaggeration", "interval_m", "layer_count", "normalize_layers"}
     for key in raw:
         if key not in known:
             warnings.append(f"[physical] unknown key '{key}' ignored")
@@ -312,14 +334,22 @@ def parse_config(data: dict[str, Any], source_path: Path | None = None) -> Confi
         raise ConfigError("config is missing the required [physical] section")
 
     region_raw = data["region"]
-    bbox_raw = _require(region_raw, "bbox", "region")
-    try:
-        bbox = BBox.from_list(list(bbox_raw))
-    except (TypeError, ValueError) as exc:
-        raise ConfigError(f"[region] bbox invalid: {exc}") from exc
-    region = RegionConfig(bbox=bbox, dem=str(region_raw.get("dem", "auto")))
+    bundle = region_raw.get("bundle")
+    bbox = None
+    if "bbox" in region_raw:
+        try:
+            bbox = BBox.from_list(list(region_raw["bbox"]))
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"[region] bbox invalid: {exc}") from exc
+    if bbox is None and bundle is None:
+        raise ConfigError("[region] must have either 'bbox' (real world) or "
+                          "'bundle' (a fictional *.terrainbundle)")
+    # A bundle implies the terrain_bundle provider unless overridden.
+    default_dem = "terrain_bundle" if bundle else "auto"
+    region = RegionConfig(bbox=bbox, dem=str(region_raw.get("dem", default_dem)),
+                          bundle=str(bundle) if bundle else None)
     for key in region_raw:
-        if key not in {"bbox", "dem"}:
+        if key not in {"bbox", "dem", "bundle"}:
             warnings.append(f"[region] unknown key '{key}' ignored")
 
     physical = _parse_physical(data["physical"], warnings)

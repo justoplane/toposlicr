@@ -181,6 +181,7 @@ def build_parts_from_model(model, symbology, cfg) -> list[Part]:
             if sym is not None:
                 part.add_op(OP_SCORE_HYDRO, sym.rivers)
                 part.add_op(OP_SCORE_HYDRO, sym.lake_outlines)
+                part.add_op(OP_ENGRAVE, sym.icons)
             part.add_op(OP_SCORE_IDS, leader_geometry_for_layer(symbology.labels, k))
             part.add_op(OP_ENGRAVE, label_geometry_for_layer(symbology.labels, k))
         parts.append(part)

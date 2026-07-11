@@ -60,6 +60,8 @@ def render_layer_svgs(model: LayerModel, cfg: Config, out_dir: str | Path,
                 if not sym.lake_outlines.is_empty:
                     doc.add_score(sym.lake_outlines, colors["score_hydro"],
                                   label="score_hydro")
+                if sym.icons is not None and not sym.icons.is_empty:
+                    doc.add_engrave(sym.icons, colors["engrave_fill"], label="icon")
             leaders = leader_geometry_for_layer(symbology.labels, layer.index)
             if not leaders.is_empty:
                 doc.add_score(leaders, colors["score_ids"], label="leader")

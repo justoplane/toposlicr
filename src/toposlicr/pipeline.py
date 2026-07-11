@@ -68,26 +68,39 @@ def run_pipeline(cfg: Config, out_dir: str | Path, *, log: Logger = _noop,
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     bbox = cfg.region.bbox
+    fictional = cfg.region.is_fictional
 
-    # Stage 1 — data acquisition.
-    log(f"[1/6] fetching DEM ({cfg.region.dem}) for {bbox_str(bbox)} …")
-    dem: DemRaster = resolve_dem(
-        cfg.region.dem, bbox, dem_resolution_m,
-        api_key=api_key, cache_dir=out.parent / "cache" / "dem", use_cache=use_cache,
-    )
-    log(f"      DEM {dem.shape[1]}×{dem.shape[0]} px, "
-        f"elevation {dem.elevation_range()[0]:.0f}–{dem.elevation_range()[1]:.0f} m")
+    # Stage 1 — data acquisition (real DEM, or a fictional terrain bundle).
+    bundle = None
+    if fictional:
+        from .bundle import load_bundle
+        log(f"[1/6] loading terrain bundle {cfg.region.bundle} …")
+        bundle = load_bundle(cfg.region.bundle)
+        dem: DemRaster = bundle.to_dem()
+        log(f"      bundle {dem.shape[1]}×{dem.shape[0]} px "
+            f"(flat, {bundle.meta.source or 'fictional'})")
+    else:
+        log(f"[1/6] fetching DEM ({cfg.region.dem}) for {bbox_str(bbox)} …")
+        dem = resolve_dem(
+            cfg.region.dem, bbox, dem_resolution_m,
+            api_key=api_key, cache_dir=out.parent / "cache" / "dem",
+            use_cache=use_cache)
+        log(f"      DEM {dem.shape[1]}×{dem.shape[0]} px, "
+            f"elevation {dem.elevation_range()[0]:.0f}–{dem.elevation_range()[1]:.0f} m")
 
     # Stages 2–3 — projection/scale + contouring into the nested layer model.
     log("[2/6] building layer model (project → scale → contour) …")
     model = build_layer_model(dem, cfg, bbox)
-    log(f"      {model.layer_count} layers, interval {model.interval_m:.0f} m, "
-        f"scale {model.scale.scale_label()}, exaggeration {model.scale.exaggeration:.2f}×")
+    log(f"      {model.layer_count} layers, interval {model.interval_m:.1f}, "
+        f"scale {model.scale.scale_label()}")
 
-    # Stage 4 — symbology (rivers, lakes, labels) against each visible band.
+    # Stage 4 — symbology (rivers, lakes, labels/icons) against each visible band.
     warnings = list(model.warnings)
     symbology: SymbologyResult | None = None
-    if fetch_symbology:
+    if fictional:
+        log("[3/6] building symbology from bundle features + water …")
+        symbology = _bundle_symbology(model, bundle, cfg, warnings)
+    elif fetch_symbology:
         log("[3/6] fetching OSM features + building symbology …")
         symbology = _run_symbology(model, cfg, bbox, out, log, use_cache, warnings)
 
@@ -142,6 +155,27 @@ def _run_layout(model, symbology, cfg, out: Path, log: Logger, warnings: list[st
     guide_path = write_assembly_guide(model, boards, cfg, out / "assembly_guide.html",
                                       project_name=project_name)
     return parts, boards, board_svgs, guide_path
+
+
+def _bundle_symbology(model, bundle, cfg, warnings: list[str]) -> SymbologyResult:
+    """Symbology for a fictional bundle: features.csv + water mask (no network).
+
+    Water-mask polygons become LAKE features (so the acrylic-inset path works
+    unchanged); named features (peaks/settlements/POIs, with optional icons)
+    come from the bundle's features.csv. Everything is already in flat world
+    units, so no reprojection happens.
+    """
+    from .bundle import FLAT_EPSG
+    from .features.schema import FeatureType, GeoFeature
+
+    coll = bundle.features()
+    for poly in bundle.water_polygons():
+        coll.add(GeoFeature(feature_type=FeatureType.LAKE, geometry=poly,
+                            importance=poly.area))
+    coll.epsg = FLAT_EPSG
+    symbology = build_symbology(model, coll, cfg)
+    warnings.extend(symbology.warnings)
+    return symbology
 
 
 def _run_symbology(model, cfg, bbox, out: Path, log: Logger, use_cache: bool,

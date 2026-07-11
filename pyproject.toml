@@ -35,6 +35,13 @@ dev = [
     "ruff>=0.6",
     "httpx>=0.27",
 ]
+fictional = [
+    "networkx>=3.6.1",
+    "opencv-python-headless>=5.0.0.93",
+    "opensimplex>=0.4.5.1",
+    "scikit-image>=0.26.0",
+    "trimesh>=4.12.2",
+]
 
 [project.scripts]
 toposlicr = "toposlicr.cli:main"

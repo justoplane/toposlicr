@@ -18,6 +18,10 @@ from affine import Affine
 
 from ..geo import BBox
 
+# Sentinel CRS for flat/fictional data (terrain bundles): the pipeline skips
+# UTM reprojection and treats the raster's units as linear world units.
+FLAT_CRS = "FLAT"
+
 
 @dataclass
 class DemRaster:

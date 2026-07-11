@@ -53,6 +53,7 @@ class LayerSymbology:
     lake_outlines: BaseGeometry              # score-mode lake boundaries
     lakes: list[GeoFeature] = field(default_factory=list)  # source features
     lake_polys: list[BaseGeometry] = field(default_factory=list)  # model-mm polys (Phase 3)
+    icons: BaseGeometry | None = None        # engraved icon glyphs (fictional maps)
 
 
 @dataclass
@@ -66,9 +67,14 @@ class SymbologyResult:
 
 
 def _to_model(model: LayerModel, geom: BaseGeometry) -> BaseGeometry:
-    """Feature geometry: source EPSG:4326 → UTM → model mm."""
-    utm = reproject_geom(geom, 4326, model.utm_epsg)
-    return apply_world_matrix(model.world_to_model, utm)
+    """Feature geometry → model mm.
+
+    Real features (EPSG:4326) reproject to the model's UTM zone first; fictional
+    features are already in flat world units, so only the world→model affine
+    applies.
+    """
+    world = geom if model.flat else reproject_geom(geom, 4326, model.utm_epsg)
+    return apply_world_matrix(model.world_to_model, world)
 
 
 def _assign_point_layer(pt: Point, bands: dict[int, BaseGeometry],
@@ -101,6 +107,7 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
     lake_outlines_by_layer: dict[int, list[BaseGeometry]] = {k: [] for k in bands}
     lakes_by_layer: dict[int, list[GeoFeature]] = {k: [] for k in bands}
     lake_polys_by_layer: dict[int, list[BaseGeometry]] = {k: [] for k in bands}
+    icons_by_layer: dict[int, list[BaseGeometry]] = {k: [] for k in bands}
     label_requests: list[LabelRequest] = []
     sym = cfg.symbology
 
@@ -136,6 +143,14 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
                 text=_peak_text(feat, cfg), anchor=pt, layer_index=k,
                 is_point=True, cap_height_mm=sym.labels.cap_height_mm,
                 font=sym.labels.font))
+            # Optional engraved icon glyph, clipped to the visible band.
+            icon_name = feat.tags.get("icon")
+            if icon_name:
+                from .icons import icon_glyph
+                glyph = icon_glyph(icon_name, pt.x, pt.y, sym.labels.icon_size_mm)
+                glyph = glyph.intersection(bands[k])
+                if not glyph.is_empty:
+                    icons_by_layer[k].append(glyph)
 
     live_requests = [r for r in label_requests if r.text.strip()]
     for req in live_requests:
@@ -157,6 +172,7 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
             lake_outlines=_merge_lines(lake_outlines_by_layer[k]),
             lakes=lakes_by_layer[k],
             lake_polys=lake_polys_by_layer[k],
+            icons=unary_union(icons_by_layer[k]) if icons_by_layer[k] else None,
         )
     return SymbologyResult(per_layer=per_layer, labels=report, warnings=warnings)
 
