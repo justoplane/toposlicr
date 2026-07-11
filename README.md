@@ -40,8 +40,22 @@ config.toml
 Uses [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv sync --extra dev      # create venv + install toposlicr and dev tools
+uv sync --extra dev            # core + dev tools
+uv sync --extra web --extra dev  # also install the browser GUI deps
 ```
+
+## Browser GUI
+
+```bash
+uv run toposlicr serve          # opens http://127.0.0.1:8000 in your browser
+```
+
+A single-page app over the same pipeline core: draw the bounding box on a map
+(or type W/S/E/N), fill the guided form (with an advanced raw-TOML panel), watch
+a live scale/interval/layer estimate as you edit, then **Run** to stream progress
+and browse the resulting layers, nested boards and assembly guide — with per-file
+and zip downloads. The FastAPI backend is a thin wrapper: it calls the exact same
+stateless functions the CLI does.
 
 ## Usage
 

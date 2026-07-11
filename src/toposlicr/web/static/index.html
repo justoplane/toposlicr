@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>toposlicr</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>toposlicr</h1>
+      <span class="tag">laser-cut topographic maps</span>
+    </div>
+    <div class="actions">
+      <span id="status" class="chip">ready</span>
+      <button id="run" class="primary">Run pipeline</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ------------------------------------------------------------------ -->
+    <section id="form" class="panel">
+      <div class="group">
+        <h2>Region</h2>
+        <div class="row4">
+          <label>West<input id="west" type="number" step="0.001" value="-118.32"></label>
+          <label>South<input id="south" type="number" step="0.001" value="36.55"></label>
+          <label>East<input id="east" type="number" step="0.001" value="-118.27"></label>
+          <label>North<input id="north" type="number" step="0.001" value="36.60"></label>
+        </div>
+        <label>DEM source
+          <select id="dem">
+            <option value="terrarium">terrarium (keyless, global)</option>
+            <option value="auto">auto (3DEP/COP30, needs API key)</option>
+            <option value="COP30">COP30 (OpenTopography)</option>
+            <option value="USGS10m">USGS 10 m (OpenTopography)</option>
+            <option value="synthetic">synthetic (offline demo)</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="group">
+        <h2>Physical</h2>
+        <div class="row2">
+          <label>Model width (mm)<input id="model_width_mm" type="number" value="450"></label>
+          <label>Ply thickness (mm)<input id="ply_thickness_mm" type="number" step="0.1" value="3.0"></label>
+        </div>
+        <div class="row2">
+          <label>Scale driver
+            <select id="driver">
+              <option value="exaggeration">exaggeration ×</option>
+              <option value="interval_m" selected>contour interval (m)</option>
+              <option value="layer_count">layer count</option>
+            </select>
+          </label>
+          <label>Value<input id="driver_value" type="number" step="0.1" value="100"></label>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>Machine</h2>
+        <div class="row2">
+          <label>Bed width (mm)<input id="bed_w" type="number" value="495"></label>
+          <label>Bed height (mm)<input id="bed_h" type="number" value="279"></label>
+        </div>
+        <div class="row2">
+          <label>Margin (mm)<input id="margin_mm" type="number" step="0.5" value="8"></label>
+          <label>Kerf (mm)<input id="kerf_mm" type="number" step="0.01" value="0.15"></label>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>Materials</h2>
+        <div class="row2">
+          <label>Default<input id="mat_default" type="text" value="birch_3mm"></label>
+          <label>Water / acrylic<input id="mat_water" type="text" value="blue_acrylic_3mm"></label>
+        </div>
+        <label>Overrides (e.g. <code>0-1=walnut_3mm</code>, comma-separated)
+          <input id="mat_overrides" type="text" placeholder="0-1=walnut_3mm"></label>
+      </div>
+
+      <div class="group">
+        <h2>Symbology <label class="inline"><input id="fetch_symbology" type="checkbox" checked> fetch OSM features</label></h2>
+        <div class="row2">
+          <label>Peak min prominence (m)<input id="peak_prom" type="number" value="150"></label>
+          <label>Max peaks (blank = all)<input id="peak_max" type="number" placeholder=""></label>
+        </div>
+        <div class="row2">
+          <label>River min stream order<input id="river_order" type="number" value="3"></label>
+          <label>Lake min area (km²)<input id="lake_area" type="number" step="0.005" value="0.05"></label>
+        </div>
+        <div class="row2">
+          <label>Lakes
+            <select id="lake_mode">
+              <option value="score">score outline</option>
+              <option value="inset">acrylic inset</option>
+            </select>
+          </label>
+          <label>Label cap height (mm)<input id="cap_height" type="number" step="0.5" value="3.5"></label>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>Panelization &amp; run</h2>
+        <div class="row2">
+          <label>Seam margin (mm)<input id="seam_margin" type="number" step="0.5" value="4"></label>
+          <label>Seam joint
+            <select id="seam_joint"><option>butt</option><option>puzzle</option></select>
+          </label>
+        </div>
+        <div class="row2">
+          <label>DEM resolution (m)<input id="dem_res" type="number" value="30"></label>
+          <label>Project name<input id="project_name" type="text" value="map"></label>
+        </div>
+        <div class="checks">
+          <label class="inline"><input id="opt_panelize" type="checkbox" checked> panelize</label>
+          <label class="inline"><input id="opt_nest" type="checkbox" checked> nest boards</label>
+          <label class="inline"><input id="opt_cache" type="checkbox" checked> use cache</label>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2><button id="toggle_toml" class="link">Advanced: raw TOML ▸</button></h2>
+        <div id="toml_wrap" class="hidden">
+          <label class="inline"><input id="use_toml" type="checkbox"> send this TOML instead of the form</label>
+          <button id="from_form" class="small">Fill from form</button>
+          <textarea id="toml" rows="14" spellcheck="false"></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------------ -->
+    <section id="work">
+      <div class="card">
+        <div id="map"></div>
+      </div>
+
+      <div class="card" id="scalecard">
+        <h3>Scale <span class="muted">(live estimate — no data fetch)</span></h3>
+        <div id="scale" class="scale-grid">…</div>
+      </div>
+
+      <div class="card hidden" id="progresscard">
+        <h3>Progress</h3>
+        <pre id="log"></pre>
+      </div>
+
+      <div class="card hidden" id="resultscard">
+        <h3>Results</h3>
+        <div id="summary"></div>
+        <div id="warnings"></div>
+        <div class="viewer">
+          <div class="thumbs">
+            <div class="thumbrow" id="row-preview"></div>
+            <h4>Layers</h4><div class="thumbrow" id="row-layers"></div>
+            <h4>Boards</h4><div class="thumbrow" id="row-boards"></div>
+          </div>
+          <div id="stage" class="stage"><p class="muted">Select a layer or board to preview.</p></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

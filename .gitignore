@@ -18,9 +18,10 @@ venv/
 .ruff_cache/
 .mypy_cache/
 
-# Pipeline outputs & caches (added as later phases land)
+# Pipeline outputs & caches
 /output/
 /cache/
+/runs/
 *.geotiff
 *.tif
 

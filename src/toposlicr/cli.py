@@ -168,6 +168,33 @@ def coupon_cmd(config_path: str, out_path: str, start: float, stop: float,
     click.secho(f"✓ coupon with {len(offsets)} offsets → {path}", fg="green")
 
 
+@main.command("serve")
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=8000, show_default=True, type=int)
+@click.option("--runs-dir", default="runs", show_default=True,
+              help="Where pipeline runs write their output.")
+@click.option("--open/--no-open", "open_browser", default=True,
+              help="Open the GUI in a browser on start.")
+def serve_cmd(host: str, port: int, runs_dir: str, open_browser: bool) -> None:
+    """Launch the browser GUI (FastAPI) over the pipeline."""
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise click.ClickException(
+            "web dependencies not installed — run: uv sync --extra web") from exc
+
+    from .web.app import create_app
+
+    app = create_app(runs_dir=runs_dir)
+    url = f"http://{host}:{port}"
+    click.secho(f"\n  toposlicr GUI → {url}\n", fg="green", bold=True)
+    if open_browser:
+        import threading
+        import webbrowser
+        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+    uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
 @main.command("validate")
 @click.argument("config_path", type=click.Path(exists=True, dir_okay=False))
 def validate_cmd(config_path: str) -> None:
