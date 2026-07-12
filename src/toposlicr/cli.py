@@ -269,14 +269,37 @@ def adapt_botw(out_dir, heightmap_png, terrain_dir, objmap_geojson, water_png,
     click.secho(f"✓ bundle → {path}", fg="green")
 
 
+def _is_wsl() -> bool:
+    """True when running under WSL (where a Windows browser can't reach 127.0.0.1)."""
+    try:
+        with open("/proc/version") as fh:
+            return "microsoft" in fh.read().lower()
+    except OSError:
+        return False
+
+
+def _lan_ip() -> str | None:
+    """Best-effort primary IP address (e.g. the WSL interface)."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except OSError:
+        return None
+
+
 @main.command("serve")
-@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--host", default=None,
+              help="Bind address (default: 0.0.0.0 under WSL, else 127.0.0.1).")
 @click.option("--port", default=8000, show_default=True, type=int)
 @click.option("--runs-dir", default="runs", show_default=True,
               help="Where pipeline runs write their output.")
 @click.option("--open/--no-open", "open_browser", default=True,
               help="Open the GUI in a browser on start.")
-def serve_cmd(host: str, port: int, runs_dir: str, open_browser: bool) -> None:
+def serve_cmd(host: str | None, port: int, runs_dir: str, open_browser: bool) -> None:
     """Launch the browser GUI (FastAPI) over the pipeline."""
     try:
         import uvicorn
@@ -286,13 +309,29 @@ def serve_cmd(host: str, port: int, runs_dir: str, open_browser: bool) -> None:
 
     from .web.app import create_app
 
+    wsl = _is_wsl()
+    # Under WSL, 127.0.0.1 inside Linux isn't reachable from a Windows browser,
+    # so bind all interfaces by default and print the reachable URLs.
+    if host is None:
+        host = "0.0.0.0" if wsl else "127.0.0.1"
+
     app = create_app(runs_dir=runs_dir)
-    url = f"http://{host}:{port}"
-    click.secho(f"\n  toposlicr GUI → {url}\n", fg="green", bold=True)
-    if open_browser:
+    click.secho("\n  toposlicr GUI running — open one of:", fg="green", bold=True)
+    if host in ("0.0.0.0", "::"):
+        click.secho(f"    http://localhost:{port}", fg="green")
+        ip = _lan_ip()
+        if ip:
+            click.secho(f"    http://{ip}:{port}"
+                        + ("   (use this from Windows if localhost fails)" if wsl else ""),
+                        fg="green")
+    else:
+        click.secho(f"    http://{host}:{port}", fg="green")
+    click.echo()
+
+    if open_browser and not wsl:   # auto-open can't reach a Windows browser from WSL
         import threading
         import webbrowser
-        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.2, lambda: webbrowser.open(f"http://localhost:{port}")).start()
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 

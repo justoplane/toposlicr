@@ -188,6 +188,10 @@ uv run toposlicr run examples/fictional-bundle.toml -o output --name Mythwold
 uv run toposlicr serve --port 8000        # opens the browser automatically
 uv run toposlicr serve --no-open --host 0.0.0.0   # headless / LAN
 ```
+It prints the URL(s) to open. **On WSL** it auto-binds all interfaces and prints
+both `http://localhost:PORT` and your WSL IP — open one of those in your Windows
+browser (try `localhost` first; use the IP if that fails). The browser
+auto-open is skipped under WSL since it can't reach a Windows browser.
 
 ---
 
