@@ -17,7 +17,7 @@ from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
 from ..geo import BBox
-from .schema import FeatureCollection, FeatureType, GeoFeature
+from .schema import NETWORK_RANK, FeatureCollection, FeatureType, GeoFeature
 
 _OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 # Overpass rejects the default python-requests UA with 406; identify ourselves.
@@ -43,6 +43,9 @@ def check_overpass_error(payload: dict) -> None:
 # works globally even without NHD's real stream order.
 _WATERWAY_ORDER = {"river": 5, "canal": 4, "stream": 2, "tidal_channel": 3}
 
+# Hiking-oriented path types (not forest roads/cycleways/steps).
+_TRAIL_HIGHWAYS = {"path", "footway", "bridleway"}
+
 _EARTH_R = 6_371_008.8
 
 
@@ -55,6 +58,8 @@ def _query(bbox: BBox) -> str:
   relation["natural"="water"]{b};
   way["landuse"="reservoir"]{b};
   way["waterway"~"river|stream|canal|tidal_channel"]{b};
+  way["highway"~"^(path|footway|bridleway)$"]{b};
+  relation["route"~"^(hiking|foot|walking)$"]{b};
   node["natural"="peak"]{b};
   node["natural"="saddle"]{b};
   node["mountain_pass"="yes"]{b};
@@ -146,11 +151,16 @@ def _way_feature(el: dict, tags: dict, name: str | None, osm_id: str) -> GeoFeat
         order = _WATERWAY_ORDER.get(tags["waterway"], 1)
         return GeoFeature(FeatureType.RIVER, LineString(coords), name=name,
                           importance=order, osm_id=osm_id, tags=tags)
+    if tags.get("highway") in _TRAIL_HIGHWAYS:
+        return GeoFeature(FeatureType.TRAIL, LineString(coords), name=name,
+                          importance=1, osm_id=osm_id, tags=tags)
     return None
 
 
 def _relation_feature(el: dict, tags: dict, name: str | None,
                       osm_id: str) -> GeoFeature | None:
+    if tags.get("route") in {"hiking", "foot", "walking"}:
+        return _route_feature(el, tags, name, osm_id)
     # Best-effort multipolygon: union outer rings, subtract inner rings.
     outers, inners = [], []
     for member in el.get("members", []):
@@ -173,6 +183,24 @@ def _relation_feature(el: dict, tags: dict, name: str | None,
     lat = geom.centroid.y
     return GeoFeature(FeatureType.LAKE, geom, name=name,
                       importance=_poly_area_km2(geom, lat), osm_id=osm_id, tags=tags)
+
+
+def _route_feature(el: dict, tags: dict, name: str | None,
+                   osm_id: str) -> GeoFeature | None:
+    """A named hiking route relation → a TRAIL from its member way geometries."""
+    lines = []
+    for member in el.get("members", []):
+        if member.get("type") != "way":
+            continue
+        coords = [(g["lon"], g["lat"]) for g in member.get("geometry", []) if g]
+        if len(coords) >= 2:
+            lines.append(LineString(coords))
+    if not lines:
+        return None
+    geom = unary_union(lines)
+    rank = NETWORK_RANK.get(str(tags.get("network", "")).lower(), 1)
+    return GeoFeature(FeatureType.TRAIL, geom, name=name, importance=rank,
+                      osm_id=osm_id, tags=tags)
 
 
 def _parse_float(val) -> float | None:

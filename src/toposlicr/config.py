@@ -36,6 +36,7 @@ _DEFAULT_COLORS = {
     "cut": "#000000",
     "score_registration": "#FF0000",
     "score_hydro": "#0000FF",
+    "score_trail": "#A05A2C",
     "score_ids": "#00A0A0",
     "engrave_fill": "#333333",
 }
@@ -117,6 +118,17 @@ class RiversConfig:
 
 
 @dataclass
+class TrailsConfig:
+    include: bool = True
+    min_network: str = "lwn"            # keep this walking-network grade and above
+    include_unnamed: bool = True        # unnamed paths as linework (no label)
+    label: bool = True                  # engrave named-trail labels
+    curved_labels: bool = True          # curve names along the path, else horizontal
+    dash_mm: float = 2.5                # dashed scored line (distinct from rivers)
+    gap_mm: float = 1.5
+
+
+@dataclass
 class LakesConfig:
     min_area_km2: float = 0.05
     mode: str = "score"                 # "score" | "inset"
@@ -136,6 +148,7 @@ class LabelsConfig:
 class SymbologyConfig:
     peaks: PeaksConfig = field(default_factory=PeaksConfig)
     rivers: RiversConfig = field(default_factory=RiversConfig)
+    trails: TrailsConfig = field(default_factory=TrailsConfig)
     lakes: LakesConfig = field(default_factory=LakesConfig)
     labels: LabelsConfig = field(default_factory=LabelsConfig)
     include_places: bool = True
@@ -306,7 +319,7 @@ def _fill_dataclass(obj: Any, raw: dict[str, Any], where: str,
 
 def _parse_symbology(raw: dict[str, Any], warnings: list[str]) -> SymbologyConfig:
     sym = SymbologyConfig()
-    subtables = {"peaks": sym.peaks, "rivers": sym.rivers,
+    subtables = {"peaks": sym.peaks, "rivers": sym.rivers, "trails": sym.trails,
                  "lakes": sym.lakes, "labels": sym.labels}
     for key, val in raw.items():
         if key in subtables:

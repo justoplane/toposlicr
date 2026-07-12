@@ -17,9 +17,14 @@ from shapely.geometry.base import BaseGeometry
 class FeatureType(StrEnum):
     LAKE = "lake"          # water polygon (natural=water, reservoir, ...)
     RIVER = "river"        # waterway line
+    TRAIL = "trail"        # hiking path / named route (line)
     PEAK = "peak"          # natural=peak point (has ele)
     PLACE = "place"        # town/valley/pass/glacier point
     COASTLINE = "coastline"
+
+
+# OSM walking-network grade → importance rank (international → local).
+NETWORK_RANK = {"iwn": 4, "nwn": 3, "rwn": 2, "lwn": 1}
 
 
 @dataclass

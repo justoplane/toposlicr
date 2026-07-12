@@ -61,6 +61,38 @@ def text_to_polygons(text: str, *, font: str = "DejaVu Sans",
     return _scale(unit, cap_height_mm, cap_height_mm, origin=(0, 0))
 
 
+def trail_name_geometry(text: str, line: BaseGeometry, *, cap_height_mm: float,
+                        font: str = "DejaVu Sans", curved: bool = True) -> BaseGeometry:
+    """Engrave a trail name along ``line`` (curved) or horizontally (fallback).
+
+    Curved placement flows each glyph along the path tangent when the segment is
+    long and smooth enough; otherwise the name is set horizontally, offset just
+    above the line's midpoint. (The curved renderer lives in ``text_along_path``.)
+    """
+    glyphs = text_to_polygons(text, font=font, cap_height_mm=cap_height_mm)
+    if glyphs.is_empty or line.is_empty:
+        return MultiPolygon()
+    if curved:
+        curved_geom = text_along_path(text, line, cap_height_mm=cap_height_mm, font=font)
+        if curved_geom is not None and not curved_geom.is_empty:
+            return curved_geom
+    # Horizontal fallback: centre the name above the segment midpoint.
+    mid = line.interpolate(0.5, normalized=True)
+    minx, miny, maxx, maxy = glyphs.bounds
+    return _translate(glyphs, mid.x - (minx + maxx) / 2.0,
+                      mid.y - miny + cap_height_mm * 0.6)
+
+
+def text_along_path(text: str, line: BaseGeometry, *, cap_height_mm: float,
+                    font: str = "DejaVu Sans") -> BaseGeometry | None:
+    """Placeholder for curved text-on-path — returns None until implemented.
+
+    Returning None makes ``trail_name_geometry`` use the horizontal fallback, so
+    the feature is complete now; the curved renderer is added separately.
+    """
+    return None
+
+
 @dataclass
 class LabelRequest:
     text: str

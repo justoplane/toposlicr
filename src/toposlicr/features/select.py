@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import SymbologyConfig
-from .schema import FeatureCollection, FeatureType, GeoFeature
+from .schema import NETWORK_RANK, FeatureCollection, FeatureType, GeoFeature
 
 _CSV_FIELDS = ["osm_id", "type", "name", "include", "label"]
 
@@ -37,6 +37,15 @@ def _auto_include(f: GeoFeature, sym: SymbologyConfig) -> bool:
                     and f.elevation < sym.peaks.min_elevation_m)
     if f.feature_type is FeatureType.RIVER:
         return (f.importance or 0) >= sym.rivers.min_stream_order
+    if f.feature_type is FeatureType.TRAIL:
+        if not sym.trails.include:
+            return False
+        network = f.tags.get("network")
+        if network:  # a named route relation — filter by walking-network grade
+            return NETWORK_RANK.get(network.lower(), 0) >= \
+                NETWORK_RANK.get(sym.trails.min_network, 1)
+        # an individual path: named trails always in; unnamed only if allowed
+        return bool(f.name) or sym.trails.include_unnamed
     if f.feature_type is FeatureType.LAKE:
         return (f.importance or 0.0) >= sym.lakes.min_area_km2
     if f.feature_type is FeatureType.PLACE:
@@ -104,24 +113,34 @@ def read_features_csv(path: str | Path) -> dict[str, tuple[bool, str]]:
 
 
 def resolve_features(coll: FeatureCollection, sym: SymbologyConfig,
-                     csv_path: str | Path) -> tuple[FeatureCollection, bool]:
-    """Auto-select, apply an existing ``features.csv``, and return the kept set.
+                     csv_path: str | Path,
+                     overrides: dict[str, bool] | None = None
+                     ) -> tuple[FeatureCollection, bool]:
+    """Auto-select, apply overrides (GUI + ``features.csv``), return the kept set.
 
-    Returns ``(collection, csv_existed)``. When the CSV does not exist it is
-    written with the automatic choices; when it does, it overrides them.
+    Returns ``(collection, csv_existed)``. ``overrides`` maps ``osm_id → include``
+    (e.g. from the GUI's per-trail checkboxes) and takes precedence over the
+    automatic choice; the merged result is written to ``features.csv`` so a later
+    CLI run sees the same selection. An existing CSV also overrides the defaults.
     """
     choices = auto_choices(coll, sym)
-    csv_p = Path(csv_path)
-    csv_existed = csv_p.is_file()
-    if csv_existed:
-        overrides = read_features_csv(csv_p)
+    if overrides:
         for c in choices:
             osm_id = c.feature.osm_id or ""
             if osm_id in overrides:
-                c.include, override_label = overrides[osm_id]
+                c.include = bool(overrides[osm_id])
+    csv_p = Path(csv_path)
+    csv_existed = csv_p.is_file()
+    if csv_existed:
+        csv_overrides = read_features_csv(csv_p)
+        for c in choices:
+            osm_id = c.feature.osm_id or ""
+            if osm_id in csv_overrides:
+                c.include, override_label = csv_overrides[osm_id]
                 if override_label:
                     c.label = override_label
-    else:
+    if overrides or not csv_existed:
+        # Persist the (auto + GUI) selection so CLI re-runs match the GUI.
         write_features_csv(choices, csv_p)
 
     kept = FeatureCollection(epsg=coll.epsg)

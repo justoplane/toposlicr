@@ -58,7 +58,8 @@ def run_pipeline(cfg: Config, out_dir: str | Path, *, log: Logger = _noop,
                  use_cache: bool = True, write_debug: bool = True,
                  fetch_symbology: bool = True, panelize: bool = True,
                  nest: bool = True, project_name: str = "toposlicr",
-                 optimize: bool = True) -> PipelineResult:
+                 optimize: bool = True,
+                 feature_overrides: dict | None = None) -> PipelineResult:
     """Run the full pipeline end-to-end and write outputs to ``out_dir``.
 
     Stages: DEM → layer model → symbology → per-layer SVGs → parts (acrylic +
@@ -102,7 +103,8 @@ def run_pipeline(cfg: Config, out_dir: str | Path, *, log: Logger = _noop,
         symbology = _bundle_symbology(model, bundle, cfg, warnings)
     elif fetch_symbology:
         log("[3/6] fetching OSM features + building symbology …")
-        symbology = _run_symbology(model, cfg, bbox, out, log, use_cache, warnings)
+        symbology = _run_symbology(model, cfg, bbox, out, log, use_cache, warnings,
+                                   feature_overrides=feature_overrides)
 
     # Per-layer SVGs (cut + registration + symbology) — always emitted.
     log("[4/6] rendering per-layer SVGs …")
@@ -175,6 +177,9 @@ def _bundle_symbology(model, bundle, cfg, warnings: list[str]) -> SymbologyResul
     for line, name in bundle.rivers():
         coll.add(GeoFeature(feature_type=FeatureType.RIVER, geometry=line,
                             name=name, importance=5))
+    for line, name in bundle.trails():
+        coll.add(GeoFeature(feature_type=FeatureType.TRAIL, geometry=line,
+                            name=name, importance=1))
     coll.epsg = FLAT_EPSG
     symbology = build_symbology(model, coll, cfg)
     warnings.extend(symbology.warnings)
@@ -182,7 +187,8 @@ def _bundle_symbology(model, bundle, cfg, warnings: list[str]) -> SymbologyResul
 
 
 def _run_symbology(model, cfg, bbox, out: Path, log: Logger, use_cache: bool,
-                   warnings: list[str]) -> SymbologyResult | None:
+                   warnings: list[str], feature_overrides: dict | None = None
+                   ) -> SymbologyResult | None:
     """Fetch OSM features, apply the features.csv loop, and build symbology.
 
     Network/parse failures degrade gracefully: the run continues terrain-only
@@ -195,7 +201,8 @@ def _run_symbology(model, cfg, bbox, out: Path, log: Logger, use_cache: bool,
         warnings.append(f"feature fetch failed ({type(exc).__name__}: {exc}); "
                         "continuing terrain-only")
         return None
-    kept, csv_existed = resolve_features(raw, cfg.symbology, out / "features.csv")
+    kept, csv_existed = resolve_features(raw, cfg.symbology, out / "features.csv",
+                                         overrides=feature_overrides)
     log(f"      {len(raw)} features fetched, {len(kept)} selected"
         + ("" if csv_existed else " (wrote features.csv)"))
 

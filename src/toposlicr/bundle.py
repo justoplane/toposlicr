@@ -97,6 +97,7 @@ class TerrainBundle:
     path: Path | None = None
     features_path: Path | None = None
     rivers_path: Path | None = None        # optional rivers.geojson (world coords)
+    trails_path: Path | None = None        # optional trails.geojson (world coords)
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -155,22 +156,35 @@ class TerrainBundle:
         scores per layer and which drive carving — travel in a separate GeoJSON
         of LineString/MultiLineString features.
         """
-        if not self.rivers_path or not self.rivers_path.is_file():
-            return []
-        from shapely.geometry import shape
+        return _read_linework(self.rivers_path)
 
-        data = json.loads(self.rivers_path.read_text())
-        feats = data.get("features", []) if isinstance(data, dict) else []
-        lines = []
-        for f in feats:
-            geom = f.get("geometry") if isinstance(f, dict) else None
-            if not geom:
-                continue
-            g = shape(geom)
-            name = (f.get("properties") or {}).get("name")
-            if g.geom_type in ("LineString", "MultiLineString") and not g.is_empty:
-                lines.append((g, name))
-        return lines
+    def trails(self) -> list:
+        """Trail linework (world coords) from an optional ``trails.geojson``.
+
+        Like rivers, trail routes are polylines, so they travel as a GeoJSON of
+        LineString/MultiLineString features (each with an optional ``name``).
+        """
+        return _read_linework(self.trails_path)
+
+
+def _read_linework(path) -> list:
+    """Read LineString/MultiLineString features (world coords) from a GeoJSON."""
+    if not path or not path.is_file():
+        return []
+    from shapely.geometry import shape
+
+    data = json.loads(path.read_text())
+    feats = data.get("features", []) if isinstance(data, dict) else []
+    lines = []
+    for f in feats:
+        geom = f.get("geometry") if isinstance(f, dict) else None
+        if not geom:
+            continue
+        g = shape(geom)
+        name = (f.get("properties") or {}).get("name")
+        if g.geom_type in ("LineString", "MultiLineString") and not g.is_empty:
+            lines.append((g, name))
+    return lines
 
 
 def _row_to_feature(row: dict) -> GeoFeature | None:
@@ -227,10 +241,12 @@ def load_bundle(path: str | Path) -> TerrainBundle:
 
     features_path = p / "features.csv"
     rivers_path = p / "rivers.geojson"
+    trails_path = p / "trails.geojson"
     return TerrainBundle(
         meta=meta, heightmap=heightmap, water=water, path=p,
         features_path=features_path if features_path.is_file() else None,
-        rivers_path=rivers_path if rivers_path.is_file() else None)
+        rivers_path=rivers_path if rivers_path.is_file() else None,
+        trails_path=trails_path if trails_path.is_file() else None)
 
 
 def read_gray(path: str | Path) -> np.ndarray:

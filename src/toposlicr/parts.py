@@ -25,10 +25,11 @@ from shapely.geometry.base import BaseGeometry
 OP_CUT = "cut"
 OP_SCORE_REGISTRATION = "score_registration"
 OP_SCORE_HYDRO = "score_hydro"
+OP_SCORE_TRAIL = "score_trail"
 OP_SCORE_IDS = "score_ids"
 OP_ENGRAVE = "engrave_fill"
 
-SCORE_OPS = (OP_SCORE_REGISTRATION, OP_SCORE_HYDRO, OP_SCORE_IDS)
+SCORE_OPS = (OP_SCORE_REGISTRATION, OP_SCORE_HYDRO, OP_SCORE_TRAIL, OP_SCORE_IDS)
 
 
 @dataclass
@@ -181,6 +182,8 @@ def build_parts_from_model(model, symbology, cfg) -> list[Part]:
             if sym is not None:
                 part.add_op(OP_SCORE_HYDRO, sym.rivers)
                 part.add_op(OP_SCORE_HYDRO, sym.lake_outlines)
+                part.add_op(OP_SCORE_TRAIL, sym.trails)
+                part.add_op(OP_ENGRAVE, sym.trail_labels)
                 part.add_op(OP_ENGRAVE, sym.icons)
             part.add_op(OP_SCORE_IDS, leader_geometry_for_layer(symbology.labels, k))
             part.add_op(OP_ENGRAVE, label_geometry_for_layer(symbology.labels, k))

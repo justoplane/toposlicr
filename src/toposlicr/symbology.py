@@ -54,6 +54,8 @@ class LayerSymbology:
     lakes: list[GeoFeature] = field(default_factory=list)  # source features
     lake_polys: list[BaseGeometry] = field(default_factory=list)  # model-mm polys (Phase 3)
     icons: BaseGeometry | None = None        # engraved icon glyphs (fictional maps)
+    trails: BaseGeometry | None = None       # dashed trail linework (score_trail)
+    trail_labels: BaseGeometry | None = None  # engraved trail names
 
 
 @dataclass
@@ -108,6 +110,8 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
     lakes_by_layer: dict[int, list[GeoFeature]] = {k: [] for k in bands}
     lake_polys_by_layer: dict[int, list[BaseGeometry]] = {k: [] for k in bands}
     icons_by_layer: dict[int, list[BaseGeometry]] = {k: [] for k in bands}
+    trails_by_layer: dict[int, list[BaseGeometry]] = {k: [] for k in bands}
+    named_trails: dict[str, BaseGeometry] = {}   # name → longest model-mm geometry
     label_requests: list[LabelRequest] = []
     sym = cfg.symbology
 
@@ -132,6 +136,18 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
                 clipped = geom_m.intersection(band)
                 if not clipped.is_empty and clipped.length > 0:
                     rivers_by_layer[k].append(clipped)
+
+        elif feat.feature_type is FeatureType.TRAIL:
+            # Trails read continuously up the stack, scored (dashed) only where
+            # exposed — same visible-band clipping as rivers.
+            for k, band in bands.items():
+                clipped = geom_m.intersection(band)
+                if not clipped.is_empty and clipped.length > 0:
+                    trails_by_layer[k].append(clipped)
+            if feat.name and sym.trails.label:
+                prev = named_trails.get(feat.name)
+                if prev is None or geom_m.length > prev.length:
+                    named_trails[feat.name] = geom_m
 
         elif feat.feature_type is FeatureType.LAKE:
             k = _assign_lake_layer(geom_m, bands, model)
@@ -173,8 +189,15 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
     for p in report.unplaced:
         warnings.append(f"label '{p.text}' could not be placed on layer {p.layer_index}")
 
+    # Trail names: label each named trail once, on the layer where its exposed
+    # segment is longest, curved along the path (with a horizontal fallback).
+    trail_labels_by_layer = _place_trail_labels(named_trails, bands, cfg)
+
     per_layer = {}
     for k in bands:
+        trail_geom = _merge_lines(trails_by_layer[k])
+        dashed = dash_line(trail_geom, sym.trails.dash_mm, sym.trails.gap_mm) \
+            if not trail_geom.is_empty else None
         per_layer[k] = LayerSymbology(
             layer_index=k,
             visible_band=bands[k],
@@ -183,8 +206,67 @@ def build_symbology(model: LayerModel, features: FeatureCollection, cfg: Config,
             lakes=lakes_by_layer[k],
             lake_polys=lake_polys_by_layer[k],
             icons=unary_union(icons_by_layer[k]) if icons_by_layer[k] else None,
+            trails=dashed,
+            trail_labels=trail_labels_by_layer.get(k),
         )
     return SymbologyResult(per_layer=per_layer, labels=report, warnings=warnings)
+
+
+def _longest_exposed_layer(geom_m: BaseGeometry, bands: dict[int, BaseGeometry]
+                           ) -> tuple[int, BaseGeometry]:
+    """Layer whose visible band holds the longest exposed piece of ``geom_m``."""
+    best_k, best_len, best_geom = -1, 0.0, None
+    for k, band in bands.items():
+        clip = geom_m.intersection(band)
+        if not clip.is_empty and clip.length > best_len:
+            best_k, best_len, best_geom = k, clip.length, clip
+    return best_k, best_geom
+
+
+def _place_trail_labels(named_trails: dict[str, BaseGeometry],
+                        bands: dict[int, BaseGeometry], cfg: Config
+                        ) -> dict[int, BaseGeometry]:
+    """Engrave each named trail's name on its most-exposed layer."""
+    from .labels import trail_name_geometry
+
+    sym = cfg.symbology
+    by_layer: dict[int, list[BaseGeometry]] = {}
+    for name, geom in named_trails.items():
+        k, seg = _longest_exposed_layer(geom, bands)
+        if k < 0 or seg is None:
+            continue
+        glyphs = trail_name_geometry(name, seg, cap_height_mm=sym.labels.cap_height_mm,
+                                     font=sym.labels.font,
+                                     curved=sym.trails.curved_labels)
+        clipped = glyphs.intersection(bands[k]) if not glyphs.is_empty else glyphs
+        if not clipped.is_empty:
+            by_layer.setdefault(k, []).append(clipped)
+    return {k: unary_union(v) for k, v in by_layer.items()}
+
+
+def dash_line(geom: BaseGeometry, dash_mm: float, gap_mm: float) -> BaseGeometry:
+    """Break line(s) into dash segments (curved-following) for a dashed score."""
+    from shapely.geometry import MultiLineString
+    from shapely.ops import substring
+
+    if geom.is_empty or dash_mm <= 0:
+        return geom
+    lines = geom.geoms if hasattr(geom, "geoms") else [geom]
+    period = dash_mm + max(gap_mm, 0.0)
+    segments = []
+    for line in lines:
+        if getattr(line, "geom_type", "") != "LineString":
+            continue
+        length = line.length
+        d = 0.0
+        while d < length:
+            end = min(d + dash_mm, length)
+            if end - d > 0.05:
+                seg = substring(line, d, end)
+                if not seg.is_empty and seg.length > 0:
+                    segments.append(seg)
+            d += period
+    return MultiLineString(segments) if segments else MultiLineString()
 
 
 def _assign_lake_layer(geom_m: BaseGeometry, bands: dict[int, BaseGeometry],
