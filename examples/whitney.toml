@@ -32,6 +32,7 @@ overrides = { "0-1" = "walnut_3mm" }
 [symbology]
 peaks = { min_prominence_m = 150, label_elevation = true }
 rivers = { min_stream_order = 3 }
+trails = { include = true, min_network = "lwn", include_unnamed = true, dash_mm = 2.5, gap_mm = 1.5 }
 lakes = { min_area_km2 = 0.05, mode = "inset", fit_gap_mm = 0.1 }
 labels = { font = "Source Sans Pro", mode = "engrave_fill", cap_height_mm = 4 }
 

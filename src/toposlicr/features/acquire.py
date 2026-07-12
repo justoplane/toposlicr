@@ -24,8 +24,10 @@ DEFAULT_CACHE_DIR = Path("cache") / "features"
 
 
 def _cache_key(bbox: BBox) -> str:
-    raw = f"osm|{bbox.west:.6f},{bbox.south:.6f},{bbox.east:.6f},{bbox.north:.6f}"
-    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+    # Hash the full query (which embeds the bbox AND the set of tags fetched) so
+    # that extending the query — e.g. adding trails — invalidates stale caches
+    # from an older version instead of silently returning trail-less results.
+    return hashlib.sha1(_query(bbox).encode()).hexdigest()[:16]
 
 
 def fetch_features(bbox: BBox, *, cache_dir: Path | str = DEFAULT_CACHE_DIR,

@@ -97,8 +97,16 @@ interval_real_m = ply_thickness_mm / (S × E × 1000) # elevation covered by one
 ```
 
 Colors map to laser operations via the machine profile (`[machine.colors]`):
-black cut, red registration score, blue hydro score, teal part-ID score, filled
-grey label engraving — the Glowforge/color-as-operation convention.
+black cut, red registration score, blue hydro score, brown **dashed trail**
+score, teal part-ID score, filled grey label engraving — the Glowforge/
+color-as-operation convention.
+
+**Trails** (`[symbology].trails`): hiking paths and named routes from OSM
+(`highway=path/footway/bridleway` + `route=hiking` relations), scored as dashed
+lines with the route names engraved along the path. Filter by walking-network
+grade (`min_network`) and `include_unnamed`; individual trails can be toggled in
+the GUI or the `features.csv` loop. Fictional maps carry trails in a bundle
+`trails.geojson`.
 
 ## Fictional maps
 
