@@ -103,19 +103,27 @@ def _tangent_deg(line: LineString, d: float, length: float, eps: float) -> float
 
 
 def _path_smooth_enough(line: LineString, s0: float, span: float, eps: float) -> bool:
-    """True if the path over [s0, s0+span] is gentle enough to letter along."""
-    length = line.length
-    samples = 20
-    step = span / samples
-    if step <= 0:
-        return False
-    angles = [_tangent_deg(line, s0 + i * step, length, eps) for i in range(samples + 1)]
-    max_turn = 0.0
-    cumulative = 0.0
-    for i in range(1, len(angles)):
-        turn = abs(_angle_diff(angles[i], angles[i - 1]))
-        max_turn = max(max_turn, turn)
-        cumulative += turn
+    """True if the path over [s0, s0+span] is gentle enough to letter along.
+
+    Turns are measured at the polyline's actual vertices (segment-to-segment
+    heading change), so a sharp kink between fixed samples can't slip through.
+    """
+    coords = list(line.coords)
+    if len(coords) < 3:
+        return True                       # a single segment has no interior kink
+    seg_dir, cum = [], [0.0]
+    for i in range(len(coords) - 1):
+        dx = coords[i + 1][0] - coords[i][0]
+        dy = coords[i + 1][1] - coords[i][1]
+        seg_dir.append(math.degrees(math.atan2(dy, dx)))
+        cum.append(cum[-1] + math.hypot(dx, dy))
+    lo, hi = s0, s0 + span
+    max_turn = cumulative = 0.0
+    for v in range(1, len(coords) - 1):   # interior vertices within the text span
+        if lo <= cum[v] <= hi:
+            turn = abs(_angle_diff(seg_dir[v], seg_dir[v - 1]))
+            max_turn = max(max_turn, turn)
+            cumulative += turn
     return max_turn <= _MAX_LOCAL_TURN_DEG and cumulative <= _MAX_CUMULATIVE_TURN_DEG
 
 
@@ -140,9 +148,13 @@ def text_along_path(text: str, line: BaseGeometry, *, cap_height_mm: float,
     if not isinstance(line, LineString) or line.length <= 0:
         return None
 
-    # Read left-to-right along the dominant direction (flip if it runs leftward).
+    # Orient the run by its overall displacement so glyphs never read upside-down
+    # or top-to-bottom: make it run rightward, or (for steep/vertical trails)
+    # upward, giving upright or upright-sideways text instead of inverted.
     coords = list(line.coords)
-    if coords[-1][0] < coords[0][0]:
+    vx = coords[-1][0] - coords[0][0]
+    vy = coords[-1][1] - coords[0][1]
+    if vx < -1e-9 or (abs(vx) <= 1e-9 and vy < 0):
         line = LineString(coords[::-1])
 
     length = line.length

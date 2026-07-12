@@ -83,6 +83,28 @@ def test_trails_include_false_drops_everything():
                    if c.feature.feature_type is FeatureType.TRAIL)
 
 
+def test_named_path_with_nonwalking_network_is_kept():
+    """min_network grades routes only — a named way with a cycle network stays."""
+    from shapely.geometry import LineString
+
+    from toposlicr.features.schema import GeoFeature
+    from toposlicr.features.select import _auto_include
+    f = GeoFeature(FeatureType.TRAIL, LineString([(0, 0), (1, 1)]),
+                   name="Riverside Path", importance=1,
+                   tags={"highway": "footway", "network": "lcn"})
+    assert _auto_include(f, SymbologyConfig()) is True
+
+
+def test_curved_text_not_upside_down_on_vertical_trail():
+    """A descending vertical segment must not render inverted (orient upward)."""
+    from toposlicr.labels import text_along_path
+    up = text_along_path("Ridge", LineString([(0, 0), (0, 100)]), cap_height_mm=4.0)
+    down = text_along_path("Ridge", LineString([(0, 100), (0, 0)]), cap_height_mm=4.0)
+    assert up is not None and down is not None
+    # Both orient upward → identical placement (down is reversed to match up).
+    assert up.equals_exact(down, tolerance=1e-6) or up.bounds == pytest.approx(down.bounds)
+
+
 # --- dashing -------------------------------------------------------------
 
 def test_dash_line_segments_a_straight_line():

@@ -233,6 +233,28 @@ def test_resolve_features_second_run_honors_edits(tmp_path):
     assert kept_feature.name == "Whitney"
 
 
+def test_gui_overrides_win_over_existing_csv(tmp_path):
+    """A fresh GUI selection must beat a stale features.csv (precedence)."""
+    coll = FeatureCollection(features=[
+        _peak("Mount Whitney", 4421, "node/1"),
+        _peak("Lone Peak", 4000, "node/2"),
+    ])
+    csv_path = tmp_path / "features.csv"
+    # An existing CSV excludes node/1.
+    choices = auto_choices(coll, SymbologyConfig())
+    _by_id(choices)["node/1"].include = False
+    write_features_csv(choices, csv_path)
+
+    coll2 = FeatureCollection(features=[
+        _peak("Mount Whitney", 4421, "node/1"),
+        _peak("Lone Peak", 4000, "node/2"),
+    ])
+    # GUI now re-includes node/1 and excludes node/2 — the GUI wins over the CSV.
+    kept, _ = resolve_features(coll2, SymbologyConfig(), csv_path,
+                               overrides={"node/1": True, "node/2": False})
+    assert {f.osm_id for f in kept.features} == {"node/1"}
+
+
 def test_read_features_csv_roundtrip(tmp_path):
     coll = FeatureCollection(features=[_peak("Mount Whitney", 4421, "node/1")])
     choices = auto_choices(coll, SymbologyConfig())

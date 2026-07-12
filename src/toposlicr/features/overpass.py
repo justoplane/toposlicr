@@ -187,7 +187,14 @@ def _relation_feature(el: dict, tags: dict, name: str | None,
 
 def _route_feature(el: dict, tags: dict, name: str | None,
                    osm_id: str) -> GeoFeature | None:
-    """A named hiking route relation → a TRAIL from its member way geometries."""
+    """A named hiking route relation → a TRAIL from its member way geometries.
+
+    Only direct way members are assembled. A "super-route" (a route whose members
+    are themselves relations, e.g. the PCT split into sections) yields no direct
+    ways here, so its umbrella name isn't labelled — but its section relations and
+    constituent ``highway=path`` ways are still fetched separately, so the trail's
+    linework and section names render regardless.
+    """
     lines = []
     for member in el.get("members", []):
         if member.get("type") != "way":

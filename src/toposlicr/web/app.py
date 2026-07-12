@@ -105,7 +105,8 @@ def create_app(runs_dir: str | Path | None = None) -> FastAPI:
             if f.osm_id:
                 g["osm_ids"].append(f.osm_id)
             net = f.tags.get("network")
-            if net and NETWORK_RANK.get(net, 0) > NETWORK_RANK.get(g["network"] or "", 0):
+            if net and NETWORK_RANK.get(net.lower(), 0) > \
+                    NETWORK_RANK.get((g["network"] or "").lower(), 0):
                 g["network"] = net
         trails = list(groups.values())
         for g in trails:

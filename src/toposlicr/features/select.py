@@ -40,11 +40,12 @@ def _auto_include(f: GeoFeature, sym: SymbologyConfig) -> bool:
     if f.feature_type is FeatureType.TRAIL:
         if not sym.trails.include:
             return False
-        network = f.tags.get("network")
-        if network:  # a named route relation — filter by walking-network grade
-            return NETWORK_RANK.get(network.lower(), 0) >= \
-                NETWORK_RANK.get(sym.trails.min_network, 1)
-        # an individual path: named trails always in; unnamed only if allowed
+        # Only a hiking-route RELATION is graded by walking-network; an individual
+        # path may carry an unrelated network tag (e.g. a cycle network) and must
+        # still follow the named/unnamed rule rather than being graded out.
+        if f.tags.get("route") in {"hiking", "foot", "walking"}:
+            network = str(f.tags.get("network", "")).lower()
+            return NETWORK_RANK.get(network, 0) >= NETWORK_RANK.get(sym.trails.min_network, 1)
         return bool(f.name) or sym.trails.include_unnamed
     if f.feature_type is FeatureType.LAKE:
         return (f.importance or 0.0) >= sym.lakes.min_area_km2
@@ -124,13 +125,11 @@ def resolve_features(coll: FeatureCollection, sym: SymbologyConfig,
     CLI run sees the same selection. An existing CSV also overrides the defaults.
     """
     choices = auto_choices(coll, sym)
-    if overrides:
-        for c in choices:
-            osm_id = c.feature.osm_id or ""
-            if osm_id in overrides:
-                c.include = bool(overrides[osm_id])
     csv_p = Path(csv_path)
     csv_existed = csv_p.is_file()
+    # Precedence: auto choice < existing features.csv < GUI overrides. An existing
+    # CSV is applied first; the GUI selection (the user's latest action) then wins
+    # over it, so a stale CSV can't undo a fresh in-GUI toggle.
     if csv_existed:
         csv_overrides = read_features_csv(csv_p)
         for c in choices:
@@ -139,8 +138,13 @@ def resolve_features(coll: FeatureCollection, sym: SymbologyConfig,
                 c.include, override_label = csv_overrides[osm_id]
                 if override_label:
                     c.label = override_label
+    if overrides:
+        for c in choices:
+            osm_id = c.feature.osm_id or ""
+            if osm_id in overrides:
+                c.include = bool(overrides[osm_id])
     if overrides or not csv_existed:
-        # Persist the (auto + GUI) selection so CLI re-runs match the GUI.
+        # Persist the merged selection so CLI re-runs match the GUI.
         write_features_csv(choices, csv_p)
 
     kept = FeatureCollection(epsg=coll.epsg)
