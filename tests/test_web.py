@@ -101,6 +101,83 @@ def test_unknown_job_404(client):
     assert client.get("/api/jobs/nope/zip").status_code == 404
 
 
+def test_features_no_bbox_returns_empty(client):
+    """A fictional/bbox-less config yields no trails (no crash, no fetch)."""
+    r = client.post("/api/features", json={
+        "config": {"region": {"bundle": "world.terrainbundle"},
+                   "physical": {"model_width_mm": 300, "normalize_layers": 6}}})
+    assert r.status_code == 200
+    assert r.json()["features"] == []
+
+
+def test_features_lists_only_trails(client, monkeypatch):
+    """/api/features returns the bbox's trails (auto-selected), filtering others."""
+    from shapely.geometry import LineString, Point
+
+    import toposlicr.web.app as appmod
+    from toposlicr.features.schema import FeatureCollection, FeatureType, GeoFeature
+
+    def fake_fetch(bbox, **kw):
+        coll = FeatureCollection()
+        coll.add(GeoFeature(FeatureType.TRAIL,
+                            LineString([(-118.30, 36.55), (-118.29, 36.57)]),
+                            name="Ridge Route", importance=3, osm_id="relation/9",
+                            tags={"network": "nwn"}))
+        coll.add(GeoFeature(FeatureType.TRAIL,
+                            LineString([(-118.31, 36.55), (-118.31, 36.58)]),
+                            name=None, importance=1, osm_id="way/2", tags={}))
+        coll.add(GeoFeature(FeatureType.PEAK, Point(-118.30, 36.56), name="A Peak",
+                            elevation=3000, osm_id="node/1", tags={}))
+        return coll
+
+    monkeypatch.setattr(appmod, "fetch_features", fake_fetch)
+    r = client.post("/api/features", json={"config": CFG})
+    assert r.status_code == 200
+    trails = r.json()["features"]
+    # Grouped by name; the peak is filtered out → 2 groups (one named, one unnamed).
+    assert len(trails) == 2
+    named = next(t for t in trails if t["name"] == "Ridge Route")
+    assert named["network"] == "nwn" and named["include"] is True
+    assert named["osm_ids"] == ["relation/9"] and named["length_km"] > 0
+    unnamed = next(t for t in trails if t["name"] is None)
+    assert unnamed["osm_ids"] == ["way/2"]             # unnamed paths collapsed
+
+
+def test_run_accepts_feature_overrides(client):
+    """/api/run forwards feature_overrides; the job still completes."""
+    body = {"config": CFG, "options": {"fetch_symbology": False},
+            "feature_overrides": {"way/2": False, "relation/9": True}}
+    _, st = _run_to_completion(client, body)
+    assert st["status"] == "done", st.get("error")
+
+
+def test_registry_forwards_feature_overrides(tmp_path):
+    """JobRegistry.create passes feature_overrides down to run_pipeline."""
+    import toposlicr.web.jobs as jobsmod
+    from toposlicr.config import parse_config
+
+    captured = {}
+
+    def fake_run_pipeline(cfg, out_dir, **kw):
+        captured["overrides"] = kw.get("feature_overrides")
+        raise RuntimeError("stop")            # short-circuit; we only check the arg
+
+    jobsmod_run = jobsmod.run_pipeline
+    jobsmod.run_pipeline = fake_run_pipeline
+    try:
+        reg = jobsmod.JobRegistry(tmp_path / "runs")
+        cfg = parse_config(CFG)
+        job = reg.create(cfg, {"fetch_symbology": False},
+                         feature_overrides={"way/2": False})
+        for _ in range(40):
+            if job.status in ("done", "error"):
+                break
+            time.sleep(0.25)
+    finally:
+        jobsmod.run_pipeline = jobsmod_run
+    assert captured["overrides"] == {"way/2": False}
+
+
 def test_fictional_upload_and_adapt_run(client, tmp_path):
     """Upload a mesh, run it through the adapter + pipeline in one job."""
     trimesh = pytest.importorskip("trimesh")

@@ -9,11 +9,13 @@ labels; unplaceable labels are reported for manual nudging.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
+from shapely.affinity import rotate as _rotate
 from shapely.affinity import scale as _scale
 from shapely.affinity import translate as _translate
-from shapely.geometry import MultiPolygon, Point, Polygon
+from shapely.geometry import LineString, MultiLineString, MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
@@ -83,14 +85,113 @@ def trail_name_geometry(text: str, line: BaseGeometry, *, cap_height_mm: float,
                       mid.y - miny + cap_height_mm * 0.6)
 
 
+# Curved-label tuning (degrees). A single sharp turn or too much cumulative bend
+# over the text span reads as broken, so we fall back to a horizontal label.
+_MAX_LOCAL_TURN_DEG = 40.0
+_MAX_CUMULATIVE_TURN_DEG = 120.0
+
+
+def _angle_diff(a: float, b: float) -> float:
+    """Signed smallest difference a-b, wrapped to (-180, 180] degrees."""
+    return (a - b + 180.0) % 360.0 - 180.0
+
+
+def _tangent_deg(line: LineString, d: float, length: float, eps: float) -> float:
+    a = line.interpolate(max(0.0, d - eps))
+    b = line.interpolate(min(length, d + eps))
+    return math.degrees(math.atan2(b.y - a.y, b.x - a.x))
+
+
+def _path_smooth_enough(line: LineString, s0: float, span: float, eps: float) -> bool:
+    """True if the path over [s0, s0+span] is gentle enough to letter along."""
+    length = line.length
+    samples = 20
+    step = span / samples
+    if step <= 0:
+        return False
+    angles = [_tangent_deg(line, s0 + i * step, length, eps) for i in range(samples + 1)]
+    max_turn = 0.0
+    cumulative = 0.0
+    for i in range(1, len(angles)):
+        turn = abs(_angle_diff(angles[i], angles[i - 1]))
+        max_turn = max(max_turn, turn)
+        cumulative += turn
+    return max_turn <= _MAX_LOCAL_TURN_DEG and cumulative <= _MAX_CUMULATIVE_TURN_DEG
+
+
 def text_along_path(text: str, line: BaseGeometry, *, cap_height_mm: float,
                     font: str = "DejaVu Sans") -> BaseGeometry | None:
-    """Placeholder for curved text-on-path — returns None until implemented.
+    """Flow ``text`` glyph-by-glyph along ``line`` (model mm), tangent to the path.
 
-    Returning None makes ``trail_name_geometry`` use the horizontal fallback, so
-    the feature is complete now; the curved renderer is added separately.
+    Each glyph is placed at its arc-length position, rotated to the local tangent
+    and offset just above the line so the name sits over the trail. Returns the
+    union of glyph polygons, or ``None`` when the segment is too short or too
+    curvy — signalling the caller to use a horizontal label instead.
     """
-    return None
+    if not text.strip() or line is None or line.is_empty:
+        return None
+
+    # 1. Work on the longest LineString component.
+    if isinstance(line, MultiLineString):
+        parts = [g for g in line.geoms if g.geom_type == "LineString" and not g.is_empty]
+        if not parts:
+            return None
+        line = max(parts, key=lambda g: g.length)
+    if not isinstance(line, LineString) or line.length <= 0:
+        return None
+
+    # Read left-to-right along the dominant direction (flip if it runs leftward).
+    coords = list(line.coords)
+    if coords[-1][0] < coords[0][0]:
+        line = LineString(coords[::-1])
+
+    length = line.length
+    cap = cap_height_mm
+    spacing = 0.12 * cap
+
+    # 2. Per-glyph geometry (centred on x=0, baseline y=0) + proportional advances.
+    glyphs: list[tuple[BaseGeometry | None, float]] = []
+    for ch in text:
+        g = text_to_polygons(ch, font=font, cap_height_mm=cap)
+        if g.is_empty:
+            glyphs.append((None, 0.4 * cap if ch == " " else 0.3 * cap))
+        else:
+            minx, _, maxx, _ = g.bounds
+            glyphs.append((g, (maxx - minx) + spacing))
+
+    total = sum(adv for _, adv in glyphs)
+    if total <= 0 or total > 0.95 * length:
+        return None
+
+    s0 = (length - total) / 2.0
+    eps = min(0.5, length / 100.0) or 0.5
+
+    # 3. Bail to horizontal if the run is too sharp/curvy to letter cleanly.
+    if not _path_smooth_enough(line, s0, total, eps):
+        return None
+
+    # 4. Place each glyph at its arc-length centre, rotated to the tangent and
+    #    offset above the line so text clears the (dashed) trail.
+    off = 0.55 * cap
+    placed = []
+    cursor = s0
+    for g, adv in glyphs:
+        centre = cursor + adv / 2.0
+        cursor += adv
+        if g is None:
+            continue
+        pt = line.interpolate(centre)
+        ang = _tangent_deg(line, centre, length, eps)
+        rad = math.radians(ang)
+        perp = (-math.sin(rad), math.cos(rad))         # left of travel = above
+        moved = _rotate(g, ang, origin=(0, 0), use_radians=False)
+        moved = _translate(moved, pt.x + perp[0] * off, pt.y + perp[1] * off)
+        placed.append(moved)
+
+    if not placed:
+        return None
+    result = unary_union(placed)
+    return result if not result.is_empty else None
 
 
 @dataclass

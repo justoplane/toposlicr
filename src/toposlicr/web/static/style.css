@@ -114,6 +114,21 @@ pre#log { background: #0f1420; color: #d7e0ee; padding: 12px; border-radius: 8px
 .downloads a { color: var(--accent); text-decoration: none; }
 .err { color: #c62828; }
 
+/* individual trail selection */
+.trails-list { max-height: 220px; overflow-y: auto; margin-top: 6px;
+  border: 1px solid var(--line); border-radius: 8px; }
+.trails-list:empty { border: 0; }
+.trail-row { display: flex; align-items: center; gap: 7px; padding: 4px 8px;
+  font-size: 12px; text-transform: none; letter-spacing: 0; color: var(--ink);
+  border-bottom: 1px solid #f0f2f5; margin: 0; cursor: pointer; }
+.trail-row:last-child { border-bottom: 0; }
+.trail-row:hover { background: #f7f9fc; }
+.trail-row input { width: auto; }
+.trail-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trail-len { flex: none; }
+.net-badge { flex: none; font-size: 10px; font-weight: 600; text-transform: uppercase;
+  padding: 1px 5px; border-radius: 4px; background: #efe3d6; color: #8a5a2c; }
+
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; }
   .panel { position: static; max-height: none; }

@@ -108,7 +108,86 @@ function requestBody() {
   const body = { options: readOptions() };
   if ($("use_toml").checked && val("toml")) body.toml = val("toml");
   else body.config = readConfig();
+  const overrides = trailOverrides();
+  if (overrides) body.feature_overrides = overrides;   // only when trails were loaded
   return body;
+}
+
+// --- individual trail selection -------------------------------------------
+let loadedTrails = [];
+
+async function loadTrails() {
+  const btn = $("load-trails");
+  btn.disabled = true;
+  $("trails-status").textContent = "loading…";
+  try {
+    const r = await fetch("/api/features", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config: readConfig() }),
+    });
+    const d = await r.json();
+    if (d.error) {
+      loadedTrails = [];
+      renderTrails();
+      $("trails-status").textContent = "couldn't load trails: " + d.error;
+    } else {
+      loadedTrails = d.features || [];
+      renderTrails();
+    }
+  } catch (e) {
+    loadedTrails = [];
+    renderTrails();
+    $("trails-status").textContent = "couldn't reach server";
+  }
+  btn.disabled = false;
+}
+
+function renderTrails() {
+  const list = $("trails-list");
+  if (!loadedTrails.length) {
+    list.innerHTML = '<p class="muted" style="font-size:12px">no trails loaded</p>';
+    $("trails-actions").classList.add("hidden");
+    updateTrailCount();
+    return;
+  }
+  list.innerHTML = loadedTrails.map((t, i) => {
+    const badge = t.network ? `<span class="net-badge">${esc(t.network)}</span>` : "";
+    const segs = t.count > 1 ? ` · ${t.count} segs` : "";
+    const name = t.name
+      ? esc(t.name)
+      : `<i>unnamed paths (${t.count})</i>`;
+    return `<label class="trail-row"><input type="checkbox" data-group="${i}" ${t.include ? "checked" : ""}>` +
+      `<span class="trail-name">${name}${segs}</span>${badge}` +
+      `<span class="muted trail-len">${t.length_km} km</span></label>`;
+  }).join("");
+  $("trails-actions").classList.remove("hidden");
+  list.querySelectorAll("input[type=checkbox]").forEach((cb) =>
+    cb.addEventListener("change", updateTrailCount));
+  updateTrailCount();
+}
+
+function updateTrailCount() {
+  const boxes = $("trails-list").querySelectorAll("input[type=checkbox]");
+  if (!boxes.length) { $("trails-status").textContent = "no trails in this area"; return; }
+  const sel = [...boxes].filter((b) => b.checked).length;
+  $("trails-status").textContent = `${boxes.length} trails, ${sel} selected`;
+}
+
+// {osm_id: checked} for every OSM segment of every loaded trail group.
+function trailOverrides() {
+  const boxes = $("trails-list").querySelectorAll("input[type=checkbox]");
+  if (!boxes.length) return null;
+  const ov = {};
+  boxes.forEach((b) => {
+    const group = loadedTrails[parseInt(b.dataset.group, 10)];
+    if (group) group.osm_ids.forEach((id) => { ov[id] = b.checked; });
+  });
+  return ov;
+}
+
+function toggleAllTrails(checked) {
+  $("trails-list").querySelectorAll("input[type=checkbox]").forEach((b) => { b.checked = checked; });
+  updateTrailCount();
 }
 
 async function uploadFile(inputId) {
@@ -370,6 +449,11 @@ function wire() {
   $("run").addEventListener("click", run);
   $("toggle_toml").addEventListener("click", () => $("toml_wrap").classList.toggle("hidden"));
   $("from_form").addEventListener("click", () => { $("toml").value = toToml(readConfig()); });
+
+  // Individual trail selection.
+  $("load-trails").addEventListener("click", loadTrails);
+  $("trails-all").addEventListener("click", () => toggleAllTrails(true));
+  $("trails-none").addEventListener("click", () => toggleAllTrails(false));
 
   // Real / Fictional tab switch.
   document.querySelectorAll(".tab").forEach((t) =>

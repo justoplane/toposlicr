@@ -47,10 +47,12 @@ class JobRegistry:
         return self._jobs.get(job_id)
 
     def create(self, cfg: Config, options: dict[str, Any],
-               api_key: str | None = None) -> Job:
+               api_key: str | None = None,
+               feature_overrides: dict[str, bool] | None = None) -> Job:
         job = self._new_job()
-        thread = threading.Thread(target=self._run, args=(job, cfg, options, api_key),
-                                  daemon=True)
+        thread = threading.Thread(
+            target=self._run, args=(job, cfg, options, api_key, feature_overrides),
+            daemon=True)
         thread.start()
         return job
 
@@ -97,7 +99,8 @@ class JobRegistry:
             job.log(f"error: {job.error}")
 
     def _run(self, job: Job, cfg: Config, options: dict[str, Any],
-             api_key: str | None) -> None:
+             api_key: str | None,
+             feature_overrides: dict[str, bool] | None = None) -> None:
         job.status = "running"
         try:
             result = run_pipeline(
@@ -109,6 +112,7 @@ class JobRegistry:
                 panelize=bool(options.get("panelize", True)),
                 nest=bool(options.get("nest", True)),
                 project_name=str(options.get("project_name", "toposlicr")),
+                feature_overrides=feature_overrides,
             )
             job.result = summarize(job, result)
             job.status = "done"

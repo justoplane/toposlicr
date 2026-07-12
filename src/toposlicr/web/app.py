@@ -21,6 +21,9 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import ConfigError, parse_config
+from ..features.acquire import fetch_features
+from ..features.schema import NETWORK_RANK, FeatureType
+from ..features.select import auto_choices
 from ..scale import solve_scale
 from .jobs import JobRegistry
 
@@ -67,6 +70,50 @@ def create_app(runs_dir: str | Path | None = None) -> FastAPI:
             "warnings": warnings + result.warnings,
         }
 
+    @app.post("/api/features")
+    async def features(request: Request) -> dict[str, Any]:
+        """List the trails in the bbox (auto-selected) for individual toggling."""
+        payload = await request.json()
+        try:
+            cfg, _ = _config_from_payload(payload)
+        except HTTPException:
+            return {"features": []}          # unparseable / fictional → nothing to fetch
+        if cfg.region.bbox is None:
+            return {"features": []}          # fictional runs carry no bbox
+        try:
+            coll = fetch_features(cfg.region.bbox,
+                                  cache_dir=registry.runs_dir / "cache" / "features")
+        except Exception as exc:  # Overpass down/timeout — surface, don't crash
+            return {"features": [], "error": f"{type(exc).__name__}: {exc}"}
+
+        # Group by trail name so one toggle controls a whole trail — OSM spreads
+        # a route (e.g. the John Muir Trail) across a relation plus many named
+        # ways. Unnamed paths collapse into a single aggregate row.
+        groups: dict[str, dict] = {}
+        for choice in auto_choices(coll, cfg.symbology):
+            f = choice.feature
+            if f.feature_type is not FeatureType.TRAIL:
+                continue
+            key = f.name or "\x00unnamed"
+            g = groups.setdefault(key, {
+                "id": key, "name": f.name, "network": None, "length_km": 0.0,
+                "count": 0, "include": False, "osm_ids": [],
+            })
+            g["length_km"] += f.geometry.length * 111.0        # deg → km (rough)
+            g["count"] += 1
+            g["include"] = g["include"] or choice.include
+            if f.osm_id:
+                g["osm_ids"].append(f.osm_id)
+            net = f.tags.get("network")
+            if net and NETWORK_RANK.get(net, 0) > NETWORK_RANK.get(g["network"] or "", 0):
+                g["network"] = net
+        trails = list(groups.values())
+        for g in trails:
+            g["length_km"] = round(g["length_km"], 2)
+        # Named trails first (alphabetical), unnamed aggregate last.
+        trails.sort(key=lambda t: (t["name"] is None, (t["name"] or "").lower()))
+        return {"features": trails}
+
     @app.post("/api/upload")
     async def upload(file: UploadFile = File(...)) -> dict[str, Any]:  # noqa: B008
         """Save an uploaded source file (mesh/art/geojson) for a fictional run."""
@@ -90,7 +137,8 @@ def create_app(runs_dir: str | Path | None = None) -> FastAPI:
             return {"job_id": job.id, "config_warnings": []}
         cfg, warnings = _config_from_payload(payload)
         api_key = os.environ.get("OPENTOPOGRAPHY_API_KEY")
-        job = registry.create(cfg, options, api_key=api_key)
+        job = registry.create(cfg, options, api_key=api_key,
+                              feature_overrides=payload.get("feature_overrides"))
         return {"job_id": job.id, "config_warnings": warnings}
 
     @app.get("/api/jobs/{job_id}")
