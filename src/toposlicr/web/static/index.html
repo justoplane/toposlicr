@@ -78,17 +78,22 @@
           <label>Ply thickness (mm)<input id="ply_thickness_mm" type="number" step="0.1" value="3.0"></label>
         </div>
         <div class="row2 mode-real">
-          <label>Scale driver
+          <label>Set vertical scale by
             <select id="driver">
-              <option value="exaggeration">exaggeration ×</option>
-              <option value="interval_m" selected>contour interval (m)</option>
-              <option value="layer_count">layer count</option>
+              <option value="layer_count" selected>Number of layers</option>
+              <option value="exaggeration">Vertical exaggeration (×)</option>
+              <option value="interval_m">Contour interval (m)</option>
             </select>
           </label>
-          <label>Value<input id="driver_value" type="number" step="0.1" value="100"></label>
+          <label id="driver_value_label">Number of layers
+            <input id="driver_value" type="number" step="1" value="15"></label>
         </div>
+        <p class="muted mode-real" style="font-size:11px;margin:-2px 0 4px">
+          These three are linked (interval × exaggeration × layer count) — pick the
+          one you care about; the others follow from the terrain and ply thickness.
+          The live estimate on the right updates as you change it.</p>
         <div class="row2 mode-fictional hidden">
-          <label>Normalize layers<input id="fnorm" type="number" value="12"></label>
+          <label>Number of layers<input id="fnorm" type="number" value="12"></label>
           <label>Clip percentiles<input id="fclip" type="text" value="0.5, 99.5"></label>
         </div>
       </div>

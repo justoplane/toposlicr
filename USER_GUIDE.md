@@ -118,7 +118,9 @@ uv run toposlicr run examples/synthetic-demo.toml -o output --no-symbology
 
 ```
 output/
-  layers/layer_NN.svg        one SVG per layer (cut + registration + symbology)
+  layers/layer_NN.svg        one SVG per layer — full layer outline + registration
+                             + symbology + panelization seams (where a big layer
+                             is split to fit the bed, in a distinct color)
   boards/board_MAT_NN.svg    nested cut boards, grouped by material
   assembly_guide.html        exploded stack, board index, material + acrylic lists
   features.csv               editable feature selection (re-run to apply edits)
@@ -203,9 +205,10 @@ results on the right.
 **Real world tab**
 1. **Region** — drag a rectangle on the map (or type W/S/E/N) and pick a DEM
    source.
-2. **Physical** — model width, ply thickness, and a scale driver
-   (exaggeration / interval / layer count). A **live scale readout** updates as
-   you edit (no data fetch).
+2. **Physical** — model width, ply thickness, and **Set vertical scale by**:
+   *Number of layers* (the default), *Vertical exaggeration*, or *Contour
+   interval*. These three are linked, so you pick the one you care about and the
+   others follow; a **live scale readout** updates as you edit (no data fetch).
 3. **Machine / Materials / Symbology** — bed size, kerf, margin; material per
    layer range + the water/acrylic material; feature thresholds.
 4. **Trails** — click **Load trails for this area** to fetch the trails in your
@@ -281,7 +284,10 @@ clip_percentiles = [0.5, 99.5]        # trim spires/pits so banding stays even
 
 **Colors = operations** (override per machine in `[machine.colors]`): `cut`
 `#000000`, `score_registration` `#FF0000`, `score_hydro` `#0000FF`,
-`score_trail` `#A05A2C`, `score_ids` `#00A0A0`, `engrave_fill` `#333333`.
+`score_trail` `#A05A2C`, `score_ids` `#00A0A0`, `engrave_fill` `#333333`,
+`seam` `#CC00CC` (panelization-split preview on the per-layer SVGs). Set the
+**number of layers** or **vertical exaggeration** in `[physical]` — pin
+`layer_count`, `exaggeration`, or `interval_m` (any one; the rest are derived).
 
 ---
 

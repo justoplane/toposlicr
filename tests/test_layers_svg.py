@@ -111,3 +111,40 @@ def test_multipolygon_path_has_multiple_subpaths():
     d = polygon_to_path_d(mp, height_mm=20)
     assert d.count("M") == 2
     assert d.count("Z") == 2
+
+
+def test_layer_seams_finds_shared_edge_between_split_parts():
+    from types import SimpleNamespace
+
+    from shapely.geometry import MultiPolygon, Polygon
+
+    from toposlicr.render import layer_seams
+    # Two ply parts of layer 0 sharing the edge x=50 (the seam).
+    left = SimpleNamespace(kind="ply", layer_index=0,
+                           outline=MultiPolygon([Polygon([(0, 0), (50, 0), (50, 100), (0, 100)])]))
+    right = SimpleNamespace(kind="ply", layer_index=0,
+                            outline=MultiPolygon([Polygon([(50, 0), (100, 0), (100, 100), (50, 100)])]))
+    seams = layer_seams([left, right], 0)
+    assert seams is not None and seams.length == pytest.approx(100, abs=0.5)
+    # A single unsplit part has no seams.
+    assert layer_seams([left], 0) is None
+
+
+def test_per_layer_svg_marks_panelization_seams(tmp_path):
+    from toposlicr.parts import build_parts_from_model
+    from toposlicr.panelize import panelize_parts
+    from toposlicr.render import render_layer_svgs
+
+    # A wide model on a tiny bed forces the base layers to be split.
+    data = {"region": {"bbox": [BBOX.west, BBOX.south, BBOX.east, BBOX.north],
+                       "dem": "synthetic"},
+            "physical": {"model_width_mm": 400, "layer_count": 6},
+            "machine": {"bed_mm": [120, 120]}}
+    cfg = parse_config(data)
+    dem = SyntheticDemProvider(base_elev_m=500, relief_m=2000, hills=1).fetch(BBOX, 30)
+    model = build_layer_model(dem, cfg, BBOX)
+    parts = panelize_parts(build_parts_from_model(model, None, cfg), model, cfg)
+    paths = render_layer_svgs(model, cfg, tmp_path, parts=parts)
+    # At least one (split) layer carries the distinct seam color/op.
+    assert any('data-op="seam"' in p.read_text() for p in paths)
+    assert any(cfg.machine.colors["seam"] in p.read_text() for p in paths)

@@ -33,13 +33,42 @@ def registration_score(model: LayerModel, k: int) -> BaseGeometry:
     return above.boundary.intersection(here)
 
 
+def layer_seams(parts, layer_index: int) -> BaseGeometry | None:
+    """Panelization seam lines for a layer — where an oversized layer is split.
+
+    When a layer is split to fit the bed, adjacent ply sub-parts share a mating
+    edge; those shared edges are the seams. Returns the merged seam linework
+    (model mm), or None if the layer wasn't split.
+    """
+    from shapely.ops import unary_union
+
+    ply = [p for p in (parts or [])
+           if getattr(p, "kind", None) == "ply" and p.layer_index == layer_index
+           and not p.outline.is_empty]
+    if len(ply) < 2:
+        return None
+    segs = []
+    for i in range(len(ply)):
+        bi = ply[i].outline.boundary
+        for j in range(i + 1, len(ply)):
+            shared = bi.intersection(ply[j].outline.boundary)
+            if not shared.is_empty and shared.length > 0.1:
+                segs.append(shared)
+    if not segs:
+        return None
+    merged = unary_union(segs)
+    return merged if not merged.is_empty else None
+
+
 def render_layer_svgs(model: LayerModel, cfg: Config, out_dir: str | Path,
-                      symbology: SymbologyResult | None = None) -> list[Path]:
+                      symbology: SymbologyResult | None = None,
+                      parts=None) -> list[Path]:
     """Write ``layer_{k}.svg`` for every layer; return the paths.
 
     Each layer carries: the cut outline, the registration score (layer above),
-    and — when symbology is supplied — river/lake score lines, label leader
-    lines, and filled label engraving.
+    and — when supplied — river/lake/trail score lines, label engraving, and the
+    **panelization seams** (distinct color) showing where an oversized layer will
+    be split to fit the cut boards.
     """
     out = Path(out_dir)
     colors = cfg.machine.colors
@@ -51,6 +80,10 @@ def render_layer_svgs(model: LayerModel, cfg: Config, out_dir: str | Path,
         reg = registration_score(model, layer.index)
         if not reg.is_empty:
             doc.add_score(reg, colors["score_registration"], label="score_registration")
+
+        seams = layer_seams(parts, layer.index)
+        if seams is not None and not seams.is_empty:
+            doc.add_score(seams, colors.get("seam", "#CC00CC"), label="seam")
 
         if symbology is not None:
             sym = symbology.for_layer(layer.index)

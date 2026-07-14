@@ -106,18 +106,31 @@ def run_pipeline(cfg: Config, out_dir: str | Path, *, log: Logger = _noop,
         symbology = _run_symbology(model, cfg, bbox, out, log, use_cache, warnings,
                                    feature_overrides=feature_overrides)
 
-    # Per-layer SVGs (cut + registration + symbology) — always emitted.
-    log("[4/6] rendering per-layer SVGs …")
-    layer_svgs = render_layer_svgs(model, cfg, out / "layers", symbology)
+    # Stage 5 — parts (acrylic insets + panelization). Built before rendering so
+    # the per-layer SVGs can show where oversized layers get split.
+    log("[4/6] building parts (acrylic insets + panelization) …")
+    parts = build_parts_from_model(model, symbology, cfg)
+    # Acrylic runs BEFORE panelization so lake holes are cut into whole layers
+    # and the emitted acrylic parts are themselves panelized if oversized.
+    if symbology is not None:
+        parts, acr_warnings = apply_acrylic(parts, model, symbology, cfg)
+        warnings.extend(acr_warnings)
+    if panelize:
+        parts = panelize_parts(parts, model, cfg)
+    log(f"      {len(parts)} parts "
+        f"({sum(1 for p in parts if p.kind == 'acrylic')} acrylic)")
 
-    # Stages 5–6 — parts (acrylic insets + panelization) → nested boards → guide.
-    parts: list[Part] = []
+    # Per-layer SVGs (cut + registration + symbology + panelization seams).
+    log("[5/6] rendering per-layer SVGs …")
+    layer_svgs = render_layer_svgs(model, cfg, out / "layers", symbology, parts=parts)
+
+    # Stage 6 — nest → cut boards → assembly guide.
     boards: list[Board] = []
     board_svgs: list[Path] = []
     guide_path: Path | None = None
     if nest:
-        parts, boards, board_svgs, guide_path = _run_layout(
-            model, symbology, cfg, out, log, warnings, project_name, panelize, optimize)
+        boards, board_svgs, guide_path = _run_nesting(
+            parts, model, cfg, out, log, project_name, optimize)
 
     debug: list[Path] = []
     if write_debug:
@@ -131,22 +144,9 @@ def run_pipeline(cfg: Config, out_dir: str | Path, *, log: Logger = _noop,
                           debug_artifacts=debug, warnings=warnings)
 
 
-def _run_layout(model, symbology, cfg, out: Path, log: Logger, warnings: list[str],
-                project_name: str, panelize: bool, optimize: bool):
-    """Parts → acrylic → panelization → nesting → boards + guide."""
-    log("[5/6] building parts (acrylic insets + panelization) …")
-    parts = build_parts_from_model(model, symbology, cfg)
-    # Acrylic runs BEFORE panelization so lake holes are cut into whole layers
-    # and the emitted acrylic parts are themselves panelized if oversized —
-    # otherwise a lake wider than the bed would reach nesting unsplit and abort.
-    if symbology is not None:
-        parts, acr_warnings = apply_acrylic(parts, model, symbology, cfg)
-        warnings.extend(acr_warnings)
-    if panelize:
-        parts = panelize_parts(parts, model, cfg)
-    log(f"      {len(parts)} parts "
-        f"({sum(1 for p in parts if p.kind == 'acrylic')} acrylic)")
-
+def _run_nesting(parts, model, cfg, out: Path, log: Logger,
+                 project_name: str, optimize: bool):
+    """Nest the (already-built) parts onto cut boards and write the guide."""
     log("[6/6] nesting parts onto cut boards …")
     boards = nest_parts(parts, cfg)
     board_svgs = render_boards(boards, cfg, out / "boards", project_name=project_name,
@@ -156,7 +156,7 @@ def _run_layout(model, symbology, cfg, out: Path, log: Logger, warnings: list[st
 
     guide_path = write_assembly_guide(model, boards, cfg, out / "assembly_guide.html",
                                       project_name=project_name)
-    return parts, boards, board_svgs, guide_path
+    return boards, board_svgs, guide_path
 
 
 def _bundle_symbology(model, bundle, cfg, warnings: list[str]) -> SymbologyResult:

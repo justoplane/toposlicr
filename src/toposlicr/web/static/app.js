@@ -428,6 +428,20 @@ function setMode(m) {
   if (m === "real") liveScale();
 }
 
+// Relabel the value field + pick a sensible default when the scale driver changes.
+const _DRIVER_META = {
+  layer_count:  { label: "Number of layers", step: "1", def: "15" },
+  exaggeration: { label: "Vertical exaggeration (×)", step: "0.1", def: "1.5" },
+  interval_m:   { label: "Contour interval (m)", step: "10", def: "100" },
+};
+function syncDriverField() {
+  const m = _DRIVER_META[val("driver")] || _DRIVER_META.layer_count;
+  $("driver_value_label").childNodes[0].nodeValue = m.label + " ";
+  $("driver_value").step = m.step;
+  $("driver_value").value = m.def;
+  scheduleScale();
+}
+
 function updateSourceFields() {
   const tier = val("ftier");
   $("ffile-wrap").classList.toggle("hidden", tier === "bundle");
@@ -442,10 +456,8 @@ function wire() {
     $(id).addEventListener("change", () => { drawRect(true); scheduleScale(); }));
   ["model_width_mm", "ply_thickness_mm", "driver", "driver_value", "dem"].forEach((id) =>
     $(id).addEventListener("input", scheduleScale));
-  $("driver").addEventListener("change", () => {
-    const d = $("driver").value;
-    $("driver_value").step = d === "layer_count" ? "1" : "0.1";
-  });
+  $("driver").addEventListener("change", syncDriverField);
+  syncDriverField();
   $("run").addEventListener("click", run);
   $("toggle_toml").addEventListener("click", () => $("toml_wrap").classList.toggle("hidden"));
   $("from_form").addEventListener("click", () => { $("toml").value = toToml(readConfig()); });

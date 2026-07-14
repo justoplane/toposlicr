@@ -39,6 +39,7 @@ _DEFAULT_COLORS = {
     "score_trail": "#A05A2C",
     "score_ids": "#00A0A0",
     "engrave_fill": "#333333",
+    "seam": "#CC00CC",          # where an oversized layer is split (preview only)
 }
 
 
