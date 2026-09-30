@@ -201,16 +201,67 @@
         <h3>Results</h3>
         <div id="summary"></div>
         <div id="warnings"></div>
-        <div class="viewer">
-          <div class="thumbs">
-            <div class="thumbrow" id="row-preview"></div>
-            <h4>Layers</h4><div class="thumbrow" id="row-layers"></div>
-            <h4>Boards</h4><div class="thumbrow" id="row-boards"></div>
+
+        <div class="rtabs" role="tablist">
+          <button class="rtab active" data-tab="stack" role="tab">Stack</button>
+          <button class="rtab" data-tab="boards" role="tab">Boards</button>
+          <button class="rtab" data-tab="downloads" role="tab">Downloads</button>
+        </div>
+
+        <!-- Stack: build the map up layer by layer -------------------------- -->
+        <div id="tab-stack" class="rpane">
+          <div class="stackview">
+            <aside class="rail">
+              <div class="stack-height">
+                <button id="stk-down" class="iconbtn" title="remove top layer (↓)">▼</button>
+                <input id="stk-slider" type="range" min="0" max="1" value="1" step="1"
+                       aria-label="stack height">
+                <button id="stk-up" class="iconbtn" title="add next layer (↑)">▲</button>
+                <button id="stk-play" class="iconbtn" title="build up layer by layer">▶</button>
+              </div>
+              <div id="stk-readout" class="muted readout">…</div>
+              <div id="stk-rail" class="layer-rail"></div>
+            </aside>
+            <div class="stagecol">
+              <div class="stack-toolbar">
+                <label class="inline"><input type="checkbox" data-toggle="water" checked> water</label>
+                <label class="inline"><input type="checkbox" data-toggle="trails" checked> trails</label>
+                <label class="inline"><input type="checkbox" data-toggle="names" checked> names</label>
+                <label class="inline"><input type="checkbox" data-toggle="seams"> seams</label>
+                <label class="inline"><input type="checkbox" data-toggle="ghost" checked> next-layer ghost</label>
+                <label class="inline"><input type="checkbox" data-toggle="shadows" checked> shadows</label>
+                <span class="spacer"></span>
+                <button id="stk-reset" class="small" title="reset zoom (double-click the map)">fit</button>
+                <button id="stk-png" class="small" title="save the current stack as a PNG">⬇ PNG</button>
+              </div>
+              <div id="stk-stage" class="stage stack-stage" tabindex="0"
+                   aria-label="layer stack; scroll to zoom, drag to pan, arrow keys to change height">
+                <p class="muted">Run the pipeline to build the stack.</p>
+              </div>
+              <div id="stk-legend" class="legend hidden" aria-label="legend"></div>
+            </div>
           </div>
-          <div class="stagecol">
-            <div id="stage" class="stage"><p class="muted">Select a layer or board to preview.</p></div>
-            <div id="legend" class="legend hidden" aria-label="legend"></div>
+        </div>
+
+        <!-- Boards: nested cut boards + composite preview ------------------- -->
+        <div id="tab-boards" class="rpane hidden">
+          <div class="viewer">
+            <div class="thumbs">
+              <div class="thumbrow" id="row-preview"></div>
+              <h4>Boards</h4><div class="thumbrow" id="row-boards"></div>
+            </div>
+            <div class="stagecol">
+              <div id="stage" class="stage"><p class="muted">Select a board to preview.</p></div>
+              <div id="legend" class="legend hidden" aria-label="legend"></div>
+            </div>
           </div>
+        </div>
+
+        <!-- Downloads ------------------------------------------------------- -->
+        <div id="tab-downloads" class="rpane hidden">
+          <div id="dl-main" class="downloads"></div>
+          <h4>Layer SVGs</h4><div id="dl-layers" class="downloads dense"></div>
+          <h4>Board SVGs</h4><div id="dl-boards" class="downloads dense"></div>
         </div>
       </div>
     </section>

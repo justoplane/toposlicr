@@ -52,6 +52,18 @@ def test_scale_reports_layers_with_elevation(client):
     assert r.json()["layer_count"] is not None
 
 
+def test_scale_layer_count_without_elevation_degrades(client):
+    """The default GUI form pins layer_count; without elevation the horizontal
+    scale + extent are still reported instead of a 400."""
+    cfg = dict(CFG, physical={"model_width_mm": 300, "layer_count": 15})
+    r = client.post("/api/scale", json={"config": cfg})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["scale_label"].startswith("1:") and d["layer_count"] == 15
+    assert d["interval_m"] is None and d["exaggeration"] is None
+    assert d["extent_km"][0] > 0 and d["model_size_mm"][0] == 300.0
+
+
 def test_scale_invalid_config_400(client):
     bad = {"region": {"bbox": [1, 2, 3]}, "physical": {"model_width_mm": 100}}
     assert client.post("/api/scale", json={"config": bad}).status_code == 400
@@ -219,3 +231,67 @@ def test_index_has_legend_container_and_static_legend_code(tmp_path):
     for op in ("cut", "score_registration", "score_hydro", "score_trail",
                "engrave_fill", "seam", "score_ids"):
         assert f'["{op}"' in js
+
+
+def test_stack_payload_shape(client):
+    """stack.json carries every layer as path data + per-op symbology."""
+    _, st = _run_to_completion(
+        client, {"config": CFG, "options": {"fetch_symbology": False}})
+    assert st["status"] == "done", st.get("error")
+    res = st["result"]
+    stack = client.get(res["stack_url"]).json()
+    m = stack["model"]
+    assert m["layer_count"] == res["scale"]["layer_count"] == len(stack["layers"])
+    assert m["width_mm"] == 300 and m["height_mm"] > 0
+    assert m["ply_thickness_mm"] == 3.0 and m["fictional"] is False
+    assert stack["colors"]["cut"] == "#000000"
+    for k, lyr in enumerate(stack["layers"]):
+        assert lyr["index"] == k
+        assert lyr["cut"].startswith("M") and lyr["cut"].endswith("Z")
+        assert lyr["material"] == "birch_3mm"
+        assert lyr["panels"] >= 1 and lyr["vertices"] > 3
+        assert isinstance(lyr["ops"], dict) and isinstance(lyr["warnings"], list)
+    # Base slab: coordinates span the full frame and never go negative.
+    import re
+    nums = [float(v) for v in re.findall(r"-?\d+\.?\d*", stack["layers"][0]["cut"])]
+    assert min(nums) >= -0.01 and max(nums) <= max(m["width_mm"], m["height_mm"]) + 0.01
+    # Thresholds rise with index.
+    thr = [lyr["threshold_m"] for lyr in stack["layers"]]
+    assert thr == sorted(thr)
+
+
+def test_stack_ops_and_layer_warnings(tmp_path):
+    """Symbology lands in ops keyed by operation; layer-tagged warnings attach."""
+    from types import SimpleNamespace
+
+    from shapely.geometry import LineString, MultiPolygon, Point, Polygon
+
+    from toposlicr.config import parse_config
+    from toposlicr.web.stack import _warnings_by_layer, build_stack
+
+    cfg = parse_config(CFG)
+    sq = lambda s: MultiPolygon([Polygon([(0, 0), (s, 0), (s, s), (0, s)])])  # noqa: E731
+    layers = [SimpleNamespace(index=0, threshold_m=500.0, geometry=sq(100), warnings=[]),
+              SimpleNamespace(index=1, threshold_m=700.0, geometry=sq(50),
+                              warnings=["clipped"])]
+    model = SimpleNamespace(layers=layers, model_width_mm=100.0, model_height_mm=100.0,
+                            interval_m=200.0, base_elev_m=500.0, max_elev_m=900.0,
+                            layer_count=2, flat=False,
+                            scale=SimpleNamespace(scale_label=lambda: "1:1000"))
+    per = {0: SimpleNamespace(rivers=LineString([(0, 0), (10, 10)]),
+                              lake_outlines=Polygon([(20, 20), (30, 20), (30, 30)]),
+                              trails=None, trail_labels=None, icons=None)}
+    labels = object()
+    sym = SimpleNamespace(for_layer=per.get, labels=labels)
+    import toposlicr.web.stack as stackmod
+    stackmod.label_geometry_for_layer = lambda rep, k: Point(1, 1).buffer(1) if k == 1 else Point()
+    stackmod.leader_geometry_for_layer = lambda rep, k: LineString()
+    result = SimpleNamespace(model=model, parts=[], symbology=sym,
+                             warnings=["label 'X' could not be placed on layer 1"])
+    stack = build_stack(result, cfg)
+    assert "score_hydro" in stack["layers"][0]["ops"]
+    assert "M" in stack["layers"][0]["ops"]["score_hydro"]
+    assert "engrave_fill" in stack["layers"][1]["ops"]
+    assert stack["layers"][1]["warnings"] == ["clipped",
+                                              "label 'X' could not be placed on layer 1"]
+    assert _warnings_by_layer(["nothing here"]) == {}

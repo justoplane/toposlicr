@@ -53,10 +53,12 @@ uv run toposlicr serve          # opens http://127.0.0.1:8000 in your browser
 A single-page app over the same pipeline core: draw the bounding box on a map
 (or type W/S/E/N), fill the guided form (with an advanced raw-TOML panel), watch
 a live scale/interval/layer estimate as you edit, then **Run** to stream progress
-and browse the resulting layers, nested boards and assembly guide — with per-file
-and zip downloads. A legend under the viewer explains every color and line style
-in whatever SVG is on stage (cut, registration, water, dashed trails, engraving,
-panel seams, the graded layer stack). The FastAPI backend is a thin wrapper: it calls the exact same
+and explore the result in the **stack viewer**: the layers drawn on top of each
+other with shading, a slider/play button to build the map up one ply at a time,
+hover to identify a layer, click one to open its cut file, zoom and pan, toggle
+water/trails/names/seams, and export a PNG. Boards and Downloads tabs hold the
+nested cut boards, the assembly guide and per-file/zip downloads. A legend under
+each viewer explains every color and line style on stage. The FastAPI backend is a thin wrapper: it calls the exact same
 stateless functions the CLI does.
 
 ## Usage

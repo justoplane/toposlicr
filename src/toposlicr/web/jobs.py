@@ -189,6 +189,14 @@ def summarize(job: Job, result: PipelineResult) -> dict[str, Any]:
 
     preview = job.out_dir / "preview.svg"
     guide = result.guide_path
+
+    # Interactive stack viewer payload (layers as path data + symbology).
+    import json
+
+    from .stack import build_stack
+    stack_path = job.out_dir / "stack.json"
+    stack_path.write_text(json.dumps(build_stack(result, result.config)),
+                          encoding="utf-8")
     return {
         "scale": {
             "label": model.scale.scale_label(),
@@ -207,6 +215,7 @@ def summarize(job: Job, result: PipelineResult) -> dict[str, Any]:
         "layers": layers,
         "boards": boards,
         "preview_url": _file_url(job, preview) if preview.exists() else None,
+        "stack_url": _file_url(job, stack_path),
         "guide_url": _file_url(job, guide) if guide and guide.exists() else None,
         "features_csv_url": _url_if_exists(job, job.out_dir / "features.csv"),
         "zip_url": f"/api/jobs/{job.id}/zip",

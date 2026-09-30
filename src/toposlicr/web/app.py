@@ -46,6 +46,21 @@ def create_app(runs_dir: str | Path | None = None) -> FastAPI:
         width_m, height_m = cfg.region.bbox.extent_m()
         min_elev = payload.get("min_elev")
         max_elev = payload.get("max_elev")
+        model_height_mm = cfg.physical.model_width_mm * (height_m / width_m)
+        if cfg.physical.layer_count and (min_elev is None or max_elev is None):
+            # Layer-count mode needs the terrain's elevation range, which only a
+            # run knows. The horizontal scale and extent don't, so report those
+            # and leave interval/exaggeration to be derived from the terrain.
+            denom = width_m * 1000.0 / cfg.physical.model_width_mm
+            return {
+                "scale_label": f"1:{round(denom):,}",
+                "interval_m": None, "exaggeration": None,
+                "layer_count": cfg.physical.layer_count,
+                "extent_km": [round(width_m / 1000, 2), round(height_m / 1000, 2)],
+                "model_size_mm": [round(cfg.physical.model_width_mm, 1),
+                                  round(model_height_mm, 1)],
+                "warnings": warnings,
+            }
         try:
             result = solve_scale(
                 model_width_mm=cfg.physical.model_width_mm,
@@ -58,7 +73,6 @@ def create_app(runs_dir: str | Path | None = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        model_height_mm = cfg.physical.model_width_mm * (height_m / width_m)
         return {
             "scale_label": result.scale_label(),
             "interval_m": round(result.interval_m, 1),

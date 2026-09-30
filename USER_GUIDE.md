@@ -222,7 +222,7 @@ results on the right.
    choices are applied on Run.
 5. **Advanced** — an optional raw-TOML panel to hand-edit anything.
 6. **Run pipeline** — streams the live progress log, then shows a results
-   gallery: composite preview, per-layer and per-board SVG viewers (with a legend explaining the colors and line styles of the SVG on stage), the assembly
+   gallery: composite preview, an interactive **layer stack** (build the map up layer by layer with a slider or play button, hover to identify layers, click a layer to open its cut file, zoom/pan, toggle water/trails/names/seams, export a PNG), plus Boards and Downloads tabs with a legend explaining the colors and line styles of the SVG on stage, the assembly
    guide, and per-file + **download-all (zip)** links.
 
 **Fictional tab**
