@@ -25,8 +25,8 @@ def smooth_dem(data: np.ndarray, sigma_px: float) -> np.ndarray:
     """Gaussian pre-smoothing. Smoothing the raster (not the vectors afterwards)
     yields far more organic contour curves (plan Section 3.1).
 
-    NaN nodata cells (e.g. the corner triangles a UTM reprojection leaves, or
-    source voids/ocean) are preserved through smoothing via a *normalized*
+    NaN nodata cells (e.g. slivers a reprojection leaves outside the source
+    footprint, or source voids/ocean) are preserved through smoothing via a *normalized*
     convolution: filling them with a constant before blurring would bleed that
     value into the terrain and make ``contourpy`` treat them as real ground —
     contaminating the base-layer footprint with the full raster rectangle.

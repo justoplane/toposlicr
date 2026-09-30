@@ -110,6 +110,18 @@ pre#log { background: #0f1420; color: #d7e0ee; padding: 12px; border-radius: 8px
 /* keep hairline cut/score strokes visible when the SVG is scaled to fit */
 .stage svg path { vector-effect: non-scaling-stroke; }
 .stage svg path[fill="none"] { stroke-width: 1.1px; }
+.stagecol { min-width: 0; }
+/* legend: what each color / line on the SVG on stage means (color = laser op) */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center;
+  margin-top: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: #f7f9fc; font-size: 12px; }
+.legend .legend-title { font-weight: 600; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .04em; font-size: 11px; }
+.legend .item { display: flex; align-items: center; gap: 7px; }
+.legend .swatch { width: 30px; height: 12px; flex: none; border-radius: 2px; display: block; }
+.legend .swatch.bands { border: 1px solid var(--line); }
+.legend .item b { font-weight: 600; color: var(--ink); }
+.legend .desc { color: var(--muted); }
 .downloads { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 .downloads a { color: var(--accent); text-decoration: none; }
 .err { color: #c62828; }

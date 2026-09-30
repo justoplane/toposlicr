@@ -52,6 +52,11 @@ coordinate system, so everything lines up automatically.
 - **Automatic nesting** onto bed-sized cut boards, grouped by material/color,
   with part IDs (`L04-P2`) scored where they'll be hidden. Post-nest validation
   rejects overlaps.
+- **North-up, rectangular frame.** Terrain is projected into a transverse
+  Mercator centered on your box (not the nearest UTM zone, whose grid
+  convergence would tilt the map by up to ~2°), and every layer is clipped to
+  the rectangle inscribed in the projected box — so the base slab is a true
+  rectangle with north straight up.
 - **Laser-ready SVGs** in true 1:1 mm units, with **color = operation** (the
   Glowforge convention): black cut, red registration, blue rivers, brown dashed
   trails, teal part-IDs, grey engraving. A cut-path optimizer reduces travel.
@@ -217,7 +222,7 @@ results on the right.
    choices are applied on Run.
 5. **Advanced** — an optional raw-TOML panel to hand-edit anything.
 6. **Run pipeline** — streams the live progress log, then shows a results
-   gallery: composite preview, per-layer and per-board SVG viewers, the assembly
+   gallery: composite preview, per-layer and per-board SVG viewers (with a legend explaining the colors and line styles of the SVG on stage), the assembly
    guide, and per-file + **download-all (zip)** links.
 
 **Fictional tab**

@@ -204,3 +204,18 @@ def test_fictional_upload_and_adapt_run(client, tmp_path):
     assert st["status"] == "done", st.get("error")
     assert st["result"]["total_boards"] >= 1
     assert any("adapt:mesh" in line for line in st["logs"])
+
+
+def test_index_has_legend_container_and_static_legend_code(tmp_path):
+    """The viewer ships a legend slot; app.js builds it from the SVG's data-op paths."""
+    from fastapi.testclient import TestClient
+
+    from toposlicr.web.app import create_app
+
+    client = TestClient(create_app(tmp_path / "runs"))
+    assert 'id="legend"' in client.get("/").text
+    js = client.get("/static/app.js").text
+    assert "renderLegend" in js
+    for op in ("cut", "score_registration", "score_hydro", "score_trail",
+               "engrave_fill", "seam", "score_ids"):
+        assert f'["{op}"' in js

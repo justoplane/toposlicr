@@ -71,11 +71,12 @@ class SymbologyResult:
 def _to_model(model: LayerModel, geom: BaseGeometry) -> BaseGeometry:
     """Feature geometry → model mm.
 
-    Real features (EPSG:4326) reproject to the model's UTM zone first; fictional
-    features are already in flat world units, so only the world→model affine
-    applies.
+    Real features (EPSG:4326) reproject into the model's projected CRS (the
+    box-centered transverse Mercator the DEM was projected into) first;
+    fictional features are already in flat world units, so only the
+    world→model affine applies.
     """
-    world = geom if model.flat else reproject_geom(geom, 4326, model.utm_epsg)
+    world = geom if model.flat else reproject_geom(geom, 4326, model.crs or model.utm_epsg)
     return apply_world_matrix(model.world_to_model, world)
 
 

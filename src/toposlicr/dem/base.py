@@ -19,7 +19,7 @@ from affine import Affine
 from ..geo import BBox
 
 # Sentinel CRS for flat/fictional data (terrain bundles): the pipeline skips
-# UTM reprojection and treats the raster's units as linear world units.
+# reprojection and treats the raster's units as linear world units.
 FLAT_CRS = "FLAT"
 
 
@@ -71,7 +71,9 @@ class DemRaster:
         return xs, ys
 
     def to_crs(self, dst_crs: str, resolution: float | None = None) -> DemRaster:
-        """Reproject to ``dst_crs`` (e.g. a UTM zone) so units are true meters.
+        """Reproject to ``dst_crs`` (an EPSG code or PROJ string, e.g. the
+        box-centered transverse Mercator from ``BBox.local_crs``) so units are
+        true meters.
 
         ``resolution`` optionally sets the output pixel size in destination
         units; by default rasterio picks one preserving the pixel count.
@@ -102,6 +104,23 @@ class DemRaster:
             resampling=Resampling.bilinear,
         )
         return DemRaster(data=dst, transform=dst_transform, crs=dst_crs, nodata=None)
+
+    def pad_edges(self, cells: int = 1) -> DemRaster:
+        """Grow the grid by ``cells`` on every side, replicating edge values.
+
+        Contours run between cell *centers*, so a band can never reach closer
+        than half a pixel to the raster edge. Padding by one replicated cell
+        pushes that limit half a pixel *outside* the original extent, so bands
+        that touch the map edge can be clipped flush to the frame instead of
+        stopping a fraction of a millimeter short of it. Nodata (NaN) at the edge
+        is replicated too, so missing data never turns into fake terrain.
+        """
+        if cells <= 0:
+            return self
+        data = np.pad(self.data, cells, mode="edge")
+        transform = self.transform * Affine.translation(-cells, -cells)
+        return DemRaster(data=data, transform=transform, crs=self.crs,
+                         nodata=self.nodata)
 
     def save_geotiff(self, path: str | Path) -> Path:
         import rasterio
@@ -142,8 +161,9 @@ class DemProvider(ABC):
     def fetch(self, bbox: BBox, resolution_m: float) -> DemRaster:
         """Return a DEM covering ``bbox`` at roughly ``resolution_m`` meters.
 
-        Implementations return data in EPSG:4326 (lon/lat); the pipeline
-        reprojects to UTM. ``resolution_m`` is a target, not a guarantee.
+        Implementations return data in any georeferenced CRS (lon/lat or a
+        projected one); the pipeline reprojects into a box-centered transverse
+        Mercator. ``resolution_m`` is a target, not a guarantee.
         """
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic

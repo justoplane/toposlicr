@@ -359,7 +359,10 @@ function finish(result) {
 }
 
 // --- results ---------------------------------------------------------------
+let lastResult = null;
+
 function renderResults(r) {
+  lastResult = r;
   $("resultscard").classList.remove("hidden");
   const s = r.scale;
   const kv = (label, v) => `<div class="kv"><b>${v}</b><span>${label}</span></div>`;
@@ -412,7 +415,81 @@ async function showSvg(btn) {
       `<div class="downloads" style="position:absolute;right:14px;bottom:8px">` +
       `<a href="${url}" download="${name}">⬇ download ${name}</a></div>`;
     stage.style.position = "relative";
-  } catch (e) { stage.innerHTML = '<p class="err">could not load SVG</p>'; }
+    renderLegend(stage.querySelector("svg"));
+  } catch (e) {
+    stage.innerHTML = '<p class="err">could not load SVG</p>';
+    renderLegend(null);
+  }
+}
+
+// --- legend ----------------------------------------------------------------
+// Every path the pipeline writes carries data-op = the laser operation it maps
+// to (color = operation, the Glowforge convention). The legend is built from
+// the ops actually present in the SVG on stage, and the swatch colors are read
+// from the SVG itself, so [machine.colors] overrides show up automatically.
+const OPS = [
+  ["cut", "Cut", "through-cut outline of this layer / part", "line"],
+  ["score_registration", "Registration", "outline of the layer above — glue the next layer inside this line", "line"],
+  ["seam", "Panel seam", "where this oversized layer is split to fit the bed (preview only, not cut)", "line"],
+  ["score_hydro", "Water", "rivers and lake outlines, scored", "line"],
+  ["score_trail", "Trail", "hiking paths and routes, scored as dashes", "dash"],
+  ["leader", "Label leader", "thin score linking a name to its feature", "line"],
+  ["score_ids", "Part ID / leaders", "scored part number (matches the assembly guide) and label leaders", "line"],
+  ["engrave_fill", "Engrave", "place names, elevations, trail names (filled = engraved)", "fill"],
+  ["icon", "Icon", "engraved feature icon", "fill"],
+  ["board_header", "Board header", "engraved project / material / board number", "fill"],
+];
+
+function safeColor(c) {
+  return /^(#[0-9a-f]{3,8}|[a-z]{3,20})$/i.test(c || "") ? c : "#000";
+}
+
+function swatch(kind, color) {
+  const c = safeColor(color);
+  if (kind === "fill")
+    return `<svg class="swatch" viewBox="0 0 30 12"><rect x="0" y="0" width="30" height="12" fill="${c}"/></svg>`;
+  const dash = kind === "dash" ? ' stroke-dasharray="5 3"' : "";
+  return `<svg class="swatch" viewBox="0 0 30 12"><line x1="0" y1="6" x2="30" y2="6" stroke="${c}" stroke-width="2"${dash}/></svg>`;
+}
+
+function legendItem(sw, label, desc) {
+  return `<span class="item">${sw}<b>${esc(label)}</b><span class="desc">${esc(desc)}</span></span>`;
+}
+
+function renderLegend(svg) {
+  const el = $("legend");
+  const items = [];
+  if (svg) {
+    // First path per op → its color.
+    const byOp = new Map();
+    svg.querySelectorAll("path[data-op]").forEach((p) => {
+      if (!byOp.has(p.dataset.op)) byOp.set(p.dataset.op, p);
+    });
+    // Composite preview: one filled band per layer, light (base) → dark (summit).
+    const bands = [...byOp.keys()].filter((k) => /^layer_\d+$/.test(k))
+      .sort((a, b) => parseInt(a.slice(6), 10) - parseInt(b.slice(6), 10));
+    if (bands.length) {
+      const n = bands.length;
+      const stops = bands.map((k, i) => {
+        const c = safeColor(byOp.get(k).getAttribute("fill"));
+        return `${c} ${(100 * i / n).toFixed(1)}% ${(100 * (i + 1) / n).toFixed(1)}%`;
+      });
+      const s = lastResult && lastResult.scale;
+      const per = s ? ` — each band is one ply, ${s.interval_m} m of elevation` : "";
+      items.push(legendItem(
+        `<span class="swatch bands" style="background:linear-gradient(90deg,${stops.join(",")})"></span>`,
+        "Layer stack", `${n} layers stacked; light = base, dark = summit${per}`));
+    }
+    for (const [op, label, desc, kind] of OPS) {
+      const p = byOp.get(op);
+      if (!p) continue;
+      const color = p.getAttribute(kind === "fill" ? "fill" : "stroke");
+      items.push(legendItem(swatch(kind, color), label, desc));
+    }
+  }
+  el.innerHTML = items.length
+    ? `<span class="legend-title">Legend · color = laser operation</span>${items.join("")}` : "";
+  el.classList.toggle("hidden", !items.length);
 }
 
 function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }

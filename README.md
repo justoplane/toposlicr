@@ -27,7 +27,7 @@ goal) without restructuring.
 config.toml
    ▼
 [1] Data acquisition (DEM + vector features)      → cached GeoTIFF / GeoJSON
-[2] Projection + scale/exaggeration math          → layer elevation bands
+[2] Projection (box-centered TM) + scale math     → layer elevation bands
 [3] Contour extraction + geometry cleanup         → per-layer polygons
 [4] Symbology (water, rivers, labels, scores)
 [5] Panelization (split oversized layers)
@@ -54,7 +54,9 @@ A single-page app over the same pipeline core: draw the bounding box on a map
 (or type W/S/E/N), fill the guided form (with an advanced raw-TOML panel), watch
 a live scale/interval/layer estimate as you edit, then **Run** to stream progress
 and browse the resulting layers, nested boards and assembly guide — with per-file
-and zip downloads. The FastAPI backend is a thin wrapper: it calls the exact same
+and zip downloads. A legend under the viewer explains every color and line style
+in whatever SVG is on stage (cut, registration, water, dashed trails, engraving,
+panel seams, the graded layer stack). The FastAPI backend is a thin wrapper: it calls the exact same
 stateless functions the CLI does.
 
 ## Usage
@@ -82,6 +84,15 @@ output/
   labels.json                editable label positions (manual-nudge loop)
   preview.svg, debug/*.geojson   non-blocking debug artifacts
 ```
+
+**Projection.** The DEM and all features are projected into a transverse
+Mercator centered on the bounding box, not the nearest UTM zone. UTM's grid
+north only points straight up on the zone's central meridian; elsewhere the grid
+is rotated by the convergence angle (≈ Δλ·sin φ — 0.8° for the Whitney example,
+up to ~2° near a zone edge), which turns the lon/lat box into a tilted
+quadrilateral. Centering the projection on the box keeps north up, and every
+layer is clipped to the rectangle inscribed in the projected box so the cut
+frame is a true rectangle with sharp corners.
 
 DEM source is chosen by `[region].dem`: `auto` (US → 3DEP, else COP30, with an
 OpenTopography key), the keyless `terrarium` (AWS terrain tiles), `synthetic`
