@@ -39,8 +39,11 @@ coordinate system, so everything lines up automatically.
 - **Lakes** — scored outlines, or **flush press-fit acrylic insets** (the lake
   is cut out and a blue-acrylic piece drops in). A calibration coupon dials in
   the press-fit tolerance for your machine/material.
-- **Labels** — peak/place names as filled-font engraving, auto-placed within the
-  visible area, with elevation optionally appended (`Mt Whitney 4,421 m`).
+- **Labels** — peak/place/lake names as filled-font engraving, placed in the
+  nearest open space on the exposed surface: rotated along the band, curved
+  when the band bends, shrunk down a size ladder (not below `min_cap_height_mm`,
+  default 2.5 mm), with the elevation dropped when room is tight, or moved to a
+  lower layer with a leader line. Water and icons are never covered.
 - **Icons** — engraved glyphs (peak/tower/shrine/settlement…) for fictional maps.
 - **Curation loop.** A `features.csv` (and `labels.json`) is written alongside
   the output; edit include/exclude or label overrides and re-run. The GUI edits
@@ -80,10 +83,10 @@ Adapters operate only on files you supply; they never download game assets.
 
 ### Browser GUI
 A no-build web app over the same core: draw the bbox on a map (or type it),
-guided form with an advanced raw-TOML panel, a **live scale estimate** as you
-edit, a **Fictional tab** (upload a mesh/artwork/Azgaar export), a **Trails
-checklist** for per-trail selection, streaming progress, and a results gallery
-(layer + board previews, assembly guide, per-file and zip downloads).
+guided form with an advanced raw-TOML panel, a **Fictional tab** (upload a
+mesh/artwork/Azgaar export), a **Trails checklist** for per-trail selection,
+and one main view that swaps from the map to a progress bar to the interactive
+**layer stack** (with Boards and Downloads tabs alongside).
 
 ---
 
@@ -213,7 +216,7 @@ results on the right.
 2. **Physical** — model width, ply thickness, and **Set vertical scale by**:
    *Number of layers* (the default), *Vertical exaggeration*, or *Contour
    interval*. These three are linked, so you pick the one you care about and the
-   others follow; a **live scale readout** updates as you edit (no data fetch).
+   others follow from the terrain and ply thickness.
 3. **Machine / Materials / Symbology** — bed size, kerf, margin; material per
    layer range + the water/acrylic material; feature thresholds.
 4. **Trails** — click **Load trails for this area** to fetch the trails in your
@@ -221,9 +224,16 @@ results on the right.
    length); tick/untick individual trails, or use *select all / none*. Your
    choices are applied on Run.
 5. **Advanced** — an optional raw-TOML panel to hand-edit anything.
-6. **Run pipeline** — streams the live progress log, then shows a results
-   gallery: composite preview, an interactive **layer stack** (build the map up layer by layer with a slider or play button, hover to identify layers, click a layer to open its cut file, zoom/pan, toggle water/trails/names/seams, export a PNG), plus Boards and Downloads tabs with a legend explaining the colors and line styles of the SVG on stage, the assembly
-   guide, and per-file + **download-all (zip)** links.
+6. **Run pipeline** — the map swaps to a progress bar while the pipeline runs,
+   then to the **Stack** tab: an interactive layer stack (build the map up layer
+   by layer with a slider or play button, hover to identify layers, click a layer
+   to open its cut file, zoom/pan, toggle water/trails/names/seams, export a
+   PNG). The **Boards** tab shows the composite preview and nested cut boards,
+   **Downloads** holds the assembly guide, per-file and **download-all (zip)**
+   links, and the **Map** tab takes you back to adjust the box. A legend under
+   each viewer explains the colors and line styles on stage. The full progress
+   log and any warnings live in the collapsed **Progress** panel at the bottom
+   of the page.
 
 **Fictional tab**
 1. Pick a **source type** (3D mesh, 2D artwork, Azgaar cells GeoJSON, or an

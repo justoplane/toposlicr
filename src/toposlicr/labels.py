@@ -128,13 +128,16 @@ def _path_smooth_enough(line: LineString, s0: float, span: float, eps: float) ->
 
 
 def text_along_path(text: str, line: BaseGeometry, *, cap_height_mm: float,
-                    font: str = "DejaVu Sans") -> BaseGeometry | None:
+                    font: str = "DejaVu Sans",
+                    offset_mm: float | None = None) -> BaseGeometry | None:
     """Flow ``text`` glyph-by-glyph along ``line`` (model mm), tangent to the path.
 
     Each glyph is placed at its arc-length position, rotated to the local tangent
-    and offset just above the line so the name sits over the trail. Returns the
-    union of glyph polygons, or ``None`` when the segment is too short or too
-    curvy — signalling the caller to use a horizontal label instead.
+    and offset perpendicular to the line: by default just above it so a trail
+    name sits over the trail; pass ``offset_mm`` to control that (a negative
+    half-height centers the text *on* the line, as the label placer does).
+    Returns the union of glyph polygons, or ``None`` when the segment is too
+    short or too curvy — signalling the caller to use a horizontal label instead.
     """
     if not text.strip() or line is None or line.is_empty:
         return None
@@ -184,7 +187,7 @@ def text_along_path(text: str, line: BaseGeometry, *, cap_height_mm: float,
 
     # 4. Place each glyph at its arc-length centre, rotated to the tangent and
     #    offset above the line so text clears the (dashed) trail.
-    off = 0.55 * cap
+    off = 0.55 * cap if offset_mm is None else offset_mm
     placed = []
     cursor = s0
     for g, adv in glyphs:
@@ -208,13 +211,17 @@ def text_along_path(text: str, line: BaseGeometry, *, cap_height_mm: float,
 
 @dataclass
 class LabelRequest:
-    text: str
+    text: str                   # full label (also the key in labels.json)
     anchor: Point               # model mm, where the label points to
     layer_index: int
     is_point: bool = True       # peaks/places anchor to a point; areas to centroid
     cap_height_mm: float = 4.0
     font: str = "DejaVu Sans"
     forced_center: tuple[float, float] | None = None   # manual override (model mm)
+    short_text: str | None = None      # fallback when space is tight (e.g. no elevation)
+    min_cap_height_mm: float = 2.5     # never shrink below this
+    priority: float = 0.0              # higher places first
+    allow_higher: bool = False         # may also fall to layers *above* (lakes in a bowl)
 
 
 @dataclass
@@ -225,112 +232,26 @@ class PlacedLabel:
     anchor: Point
     placed: bool
     leader: BaseGeometry | None = None
-
-
-# 8 candidate offset directions (unit vectors), tried in this order.
-_DIRECTIONS = [
-    (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1),
-]
+    rotation_deg: float = 0.0
+    cap_height_mm: float = 0.0
+    rendered_text: str = ""     # what was actually engraved (may be short_text)
+    curved: bool = False
 
 
 def place_labels(requests: list[LabelRequest], visible_bands: dict[int, BaseGeometry],
-                 *, gap_mm: float = 1.5, fallback_depth: int = 4) -> list[PlacedLabel]:
-    """Greedily place labels within each layer's visible band, avoiding overlaps.
+                 *, gap_mm: float = 1.5, fallback_depth: int = 4, **kwargs
+                 ) -> list[PlacedLabel]:
+    """Place labels in each layer's visible band — see :mod:`toposlicr.placement`.
 
-    Tries the anchor plus 8 offset positions; the first candidate that fits the
-    visible band and clears already-placed labels wins. Larger/lower labels are
-    placed first (more constrained), improving overall success.
-
-    A point label whose home layer is too small (a summit cap) falls back to
-    lower, larger bands — up to ``fallback_depth`` layers down — where it lands
-    in the visible band with a leader line pointing toward the feature. This is
-    the standard cartographic fix for peaks too small to letter directly.
+    Finds open space first (the band eroded by half the text height), then
+    fits sized, rotated or curved text into it, nearest to the feature. A point
+    label whose home layer is too small (a summit cap) falls back to lower,
+    larger bands — up to ``fallback_depth`` layers down — with a leader line.
     """
-    placed: list[PlacedLabel] = []
-    occupied: dict[int, BaseGeometry] = {}
-    # Place higher (smaller) layers and larger text first — most constrained.
-    ordered = sorted(requests, key=lambda r: (-r.layer_index, -r.cap_height_mm))
-    for req in ordered:
-        glyphs = text_to_polygons(req.text, font=req.font, cap_height_mm=req.cap_height_mm)
-        # A manually-nudged label is honored verbatim, no search.
-        if req.forced_center is not None:
-            placed.append(_place_forced(req, glyphs))
-            continue
-        home = req.layer_index
-        lowest = max(0, home - fallback_depth) if req.is_point else home
-        result = PlacedLabel(req.text, home, MultiPolygon(), req.anchor, False)
-        for j in range(home, lowest - 1, -1):
-            band = visible_bands.get(j)
-            candidate = _place_one(req, glyphs, band, occupied.get(j), gap_mm,
-                                   layer_index=j)
-            if candidate.placed:
-                result = candidate
-                occ = occupied.get(j)
-                occupied[j] = (candidate.geometry if occ is None
-                               else unary_union([occ, candidate.geometry]))
-                break
-        placed.append(result)
-    return placed
+    from .placement import place_labels as _place
 
-
-def _place_forced(req: LabelRequest, glyphs: BaseGeometry) -> PlacedLabel:
-    """Place a label at a manual override position, centered, without search."""
-    if glyphs.is_empty:
-        return PlacedLabel(req.text, req.layer_index, MultiPolygon(), req.anchor, False)
-    minx, miny, maxx, maxy = glyphs.bounds
-    mid_y = (miny + maxy) / 2.0
-    cx, cy = req.forced_center
-    moved = _translate(glyphs, cx, cy - mid_y)
-    leader = _leader_line(req.anchor, moved) if req.is_point else None
-    return PlacedLabel(req.text, req.layer_index, moved, req.anchor, True, leader)
-
-
-def _place_one(req: LabelRequest, glyphs: BaseGeometry, band: BaseGeometry | None,
-               occupied: BaseGeometry | None, gap_mm: float,
-               layer_index: int) -> PlacedLabel:
-    if glyphs.is_empty or band is None or band.is_empty:
-        return PlacedLabel(req.text, layer_index, MultiPolygon(), req.anchor, False)
-
-    minx, miny, maxx, maxy = glyphs.bounds
-    half_w = (maxx - minx) / 2.0
-    half_h = (maxy - miny) / 2.0
-    mid_y = (miny + maxy) / 2.0            # glyph bbox is centered on x=0, baseline y=0
-    ax, ay = req.anchor.x, req.anchor.y
-
-    # Position the glyph bbox-center: first on the anchor, then in rings of
-    # offsets at increasing distance (so a peak on a lower band can sit farther
-    # out with a longer leader). Translation places bbox center (0, mid_y).
-    targets = [(ax, ay)]
-    for ring in (1, 2, 3):
-        for dx, dy in _DIRECTIONS:
-            targets.append((ax + dx * (half_w + gap_mm) * ring,
-                            ay + dy * (half_h + gap_mm) * ring))
-
-    for i, (tx, ty) in enumerate(targets):
-        moved = _translate(glyphs, tx, ty - mid_y)
-        if not moved.within(band):
-            continue
-        if occupied is not None and moved.intersects(occupied):
-            continue
-        leader = None
-        if i != 0 and req.is_point:
-            leader = _leader_line(req.anchor, moved)
-            if leader is not None:
-                leader = leader.intersection(band)  # score only the exposed part
-                if leader.is_empty:
-                    leader = None
-        return PlacedLabel(req.text, layer_index, moved, req.anchor, True, leader)
-
-    return PlacedLabel(req.text, layer_index, MultiPolygon(), req.anchor, False)
-
-
-def _leader_line(anchor: Point, glyphs: BaseGeometry):
-    from shapely.geometry import LineString
-    from shapely.ops import nearest_points
-
-    near = nearest_points(anchor, glyphs)[1]
-    line = LineString([(anchor.x, anchor.y), (near.x, near.y)])
-    return line if line.length > 0.5 else None
+    return _place(requests, visible_bands, gap_mm=gap_mm,
+                  fallback_depth=fallback_depth, **kwargs)
 
 
 @dataclass
@@ -367,6 +288,10 @@ def write_labels_file(report: LabelReport, path) -> None:
         rows.append({
             "text": p.text, "layer": p.layer_index, "placed": p.placed,
             "center": [round(cx, 2), round(cy, 2)],
+            "rendered": p.rendered_text or p.text,
+            "cap_height_mm": round(p.cap_height_mm, 2),
+            "rotation_deg": round(p.rotation_deg, 1),
+            "curved": p.curved,
         })
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(rows, indent=2), encoding="utf-8")

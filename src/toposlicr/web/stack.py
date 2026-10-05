@@ -16,6 +16,7 @@ from typing import Any
 from shapely import get_num_coordinates
 
 from ..config import Config
+from ..panelize import seam_visibility
 from ..parts import material_for_layer
 from ..pipeline import PipelineResult
 from ..render import layer_seams
@@ -51,7 +52,12 @@ def build_stack(result: PipelineResult, cfg: Config) -> dict[str, Any]:
             _put(ops, "seam", [seams], height)
         panels = sum(1 for p in parts
                      if getattr(p, "kind", None) == "ply" and p.layer_index == k)
+        seam_total, seam_exposed = seam_visibility(parts, model, k) if parts else (0.0, 0.0)
         layers.append({
+            "seam_mm": round(seam_total),
+            "seam_exposed_mm": round(seam_exposed),
+            "seam_hidden_pct": (round(100 * (1 - seam_exposed / seam_total))
+                                if seam_total > 0 else None),
             "index": k,
             "threshold_m": round(layer.threshold_m, 1),
             "material": material_for_layer(k, cfg.materials),

@@ -120,3 +120,22 @@ def test_validate_boards_detects_out_of_bounds():
                   parts=[p])
     with pytest.raises(ValueError, match="outside board"):
         validate_boards([board], cfg)
+
+
+def test_nest_rotates_a_part_that_only_fits_sideways():
+    cfg = parse_config({
+        "region": {"bbox": [-118.35, 36.52, -118.20, 36.62], "dem": "synthetic"},
+        "physical": {"model_width_mm": 300, "ply_thickness_mm": 3.0, "exaggeration": 1.5},
+        "machine": {"bed_mm": [495, 279], "margin_mm": 0.0},
+    })
+    tall = Part(part_id="L00-P0", kind="ply", material="birch_3mm",
+                outline=MultiPolygon([Polygon([(0, 0), (100, 0), (100, 400), (0, 400)])]),
+                layer_index=0)
+    boards = nest_parts([tall], cfg)
+    assert len(boards) == 1
+    placed = boards[0].parts[0]
+    assert placed.placement.rotation_deg == 90.0
+    minx, miny, maxx, maxy = placed.placed_geometries()["cut"].bounds
+    assert maxx - minx == pytest.approx(400) and maxy - miny == pytest.approx(100)
+    assert minx >= -1e-6 and miny >= -1e-6 and maxx <= 495 + 1e-6 and maxy <= 279 + 1e-6
+    validate_boards(boards, cfg)      # no overlap / out-of-bed

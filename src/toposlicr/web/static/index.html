@@ -90,8 +90,7 @@
         </div>
         <p class="muted mode-real" style="font-size:11px;margin:-2px 0 4px">
           These three are linked (interval × exaggeration × layer count) — pick the
-          one you care about; the others follow from the terrain and ply thickness.
-          The live estimate on the right updates as you change it.</p>
+          one you care about; the others follow from the terrain and ply thickness.</p>
         <div class="row2 mode-fictional hidden">
           <label>Number of layers<input id="fnorm" type="number" value="12"></label>
           <label>Clip percentiles<input id="fclip" type="text" value="0.5, 99.5"></label>
@@ -183,43 +182,32 @@
 
     <!-- ------------------------------------------------------------------ -->
     <section id="work">
-      <div class="card">
-        <div id="map"></div>
-      </div>
-
-      <div class="card" id="scalecard">
-        <h3>Scale <span class="muted">(live estimate — no data fetch)</span></h3>
-        <div id="scale" class="scale-grid">…</div>
-      </div>
-
-      <div class="card hidden" id="progresscard">
-        <h3>Progress</h3>
-        <pre id="log"></pre>
-      </div>
-
-      <div class="card hidden" id="resultscard">
-        <h3>Results</h3>
-        <div id="summary"></div>
-        <div id="warnings"></div>
-
+      <div class="card" id="maincard">
         <div class="rtabs" role="tablist">
-          <button class="rtab active" data-tab="stack" role="tab">Stack</button>
-          <button class="rtab" data-tab="boards" role="tab">Boards</button>
-          <button class="rtab" data-tab="downloads" role="tab">Downloads</button>
+          <button class="rtab active" data-tab="map" role="tab">Map</button>
+          <button class="rtab" data-tab="stack" role="tab" disabled>Stack</button>
+          <button class="rtab" data-tab="boards" role="tab" disabled>Boards</button>
+          <button class="rtab" data-tab="downloads" role="tab" disabled>Downloads</button>
+        </div>
+
+        <!-- Map: draw / adjust the bounding box ------------------------------ -->
+        <div id="tab-map" class="rpane">
+          <div id="map"></div>
+        </div>
+
+        <!-- Loading: shown while the pipeline runs --------------------------- -->
+        <div id="tab-loading" class="rpane hidden">
+          <div class="loading">
+            <div class="bar"><div id="bar-fill" class="fill"></div></div>
+            <div id="bar-stage" class="muted">starting…</div>
+            <p class="muted" style="font-size:12px">Full log in the Progress panel at the bottom of the page.</p>
+          </div>
         </div>
 
         <!-- Stack: build the map up layer by layer -------------------------- -->
-        <div id="tab-stack" class="rpane">
+        <div id="tab-stack" class="rpane hidden">
           <div class="stackview">
             <aside class="rail">
-              <div class="stack-height">
-                <button id="stk-down" class="iconbtn" title="remove top layer (↓)">▼</button>
-                <input id="stk-slider" type="range" min="0" max="1" value="1" step="1"
-                       aria-label="stack height">
-                <button id="stk-up" class="iconbtn" title="add next layer (↑)">▲</button>
-                <button id="stk-play" class="iconbtn" title="build up layer by layer">▶</button>
-              </div>
-              <div id="stk-readout" class="muted readout">…</div>
               <div id="stk-rail" class="layer-rail"></div>
             </aside>
             <div class="stagecol">
@@ -238,6 +226,14 @@
                    aria-label="layer stack; scroll to zoom, drag to pan, arrow keys to change height">
                 <p class="muted">Run the pipeline to build the stack.</p>
               </div>
+              <div class="stack-height">
+                <button id="stk-down" class="iconbtn" title="remove top layer (↓)">▼</button>
+                <input id="stk-slider" type="range" min="0" max="1" value="1" step="1"
+                       aria-label="stack height">
+                <button id="stk-up" class="iconbtn" title="add next layer (↑)">▲</button>
+                <button id="stk-play" class="iconbtn" title="build up layer by layer">▶</button>
+              </div>
+              <div id="stk-readout" class="muted readout">…</div>
               <div id="stk-legend" class="legend hidden" aria-label="legend"></div>
             </div>
           </div>
@@ -264,6 +260,13 @@
           <h4>Board SVGs</h4><div id="dl-boards" class="downloads dense"></div>
         </div>
       </div>
+
+      <!-- Progress log + warnings, collapsed by default ---------------------- -->
+      <details class="card progress" id="progresscard">
+        <summary><b>Progress</b> <span id="progress-summary" class="muted">no run yet</span></summary>
+        <pre id="log"></pre>
+        <div id="warnings"></div>
+      </details>
     </section>
   </main>
 

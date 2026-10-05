@@ -117,6 +117,7 @@ def run_pipeline(cfg: Config, out_dir: str | Path, *, log: Logger = _noop,
         warnings.extend(acr_warnings)
     if panelize:
         parts = panelize_parts(parts, model, cfg)
+        _report_seams(parts, model, log, warnings)
     log(f"      {len(parts)} parts "
         f"({sum(1 for p in parts if p.kind == 'acrylic')} acrylic)")
 
@@ -142,6 +143,27 @@ def run_pipeline(cfg: Config, out_dir: str | Path, *, log: Logger = _noop,
                           parts=parts, boards=boards, layer_svgs=layer_svgs,
                           board_svgs=board_svgs, guide_path=guide_path,
                           debug_artifacts=debug, warnings=warnings)
+
+
+# Warn when a split layer shows more than this much seam on the finished stack.
+SEAM_WARN_EXPOSED_MM = 5.0
+
+
+def _report_seams(parts, model, log: Logger, warnings: list[str]) -> None:
+    """Log the total seam length + hidden fraction; warn per exposed layer."""
+    from .panelize import seam_visibility
+
+    total = exposed = 0.0
+    for k in range(model.layer_count):
+        t, e = seam_visibility(parts, model, k)
+        total += t
+        exposed += e
+        if e > SEAM_WARN_EXPOSED_MM:
+            warnings.append(f"layer {k}: {e:.0f} of {t:.0f} mm of panel seam is "
+                            f"exposed ({100 * (1 - e / t):.0f}% hidden)")
+    if total > 0:
+        log(f"      seams: {total:.0f} mm, {100 * (1 - exposed / total):.0f}% hidden "
+            f"under the layer above")
 
 
 def _run_nesting(parts, model, cfg, out: Path, log: Logger,

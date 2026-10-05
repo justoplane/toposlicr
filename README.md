@@ -51,9 +51,9 @@ uv run toposlicr serve          # opens http://127.0.0.1:8000 in your browser
 ```
 
 A single-page app over the same pipeline core: draw the bounding box on a map
-(or type W/S/E/N), fill the guided form (with an advanced raw-TOML panel), watch
-a live scale/interval/layer estimate as you edit, then **Run** to stream progress
-and explore the result in the **stack viewer**: the layers drawn on top of each
+(or type W/S/E/N), fill the guided form (with an advanced raw-TOML panel), then
+**Run**. The map swaps to a progress bar while the pipeline runs and then to the
+**stack viewer**: the layers drawn on top of each
 other with shading, a slider/play button to build the map up one ply at a time,
 hover to identify a layer, click one to open its cut file, zoom and pan, toggle
 water/trails/names/seams, and export a PNG. Boards and Downloads tabs hold the
@@ -113,6 +113,14 @@ Colors map to laser operations via the machine profile (`[machine.colors]`):
 black cut, red registration score, blue hydro score, brown **dashed trail**
 score, teal part-ID score, filled grey label engraving — the Glowforge/
 color-as-operation convention.
+
+**Labels** find open space first: each layer's exposed band is eroded by half
+the text height, and names are set along the resulting centerlines — rotated to
+the band, or curved along it when it bends — as close to the feature as the
+room allows. A cramped name steps down a size ladder (never below
+`min_cap_height_mm`), drops its elevation, or falls to a lower layer with a
+leader line. Rivers, lakes and icons are obstacles. `labels.json` records the
+chosen size and rotation and still accepts hand-nudged centers.
 
 **Trails** (`[symbology].trails`): hiking paths and named routes from OSM
 (`highway=path/footway/bridleway` + `route=hiking` relations), scored as dashed

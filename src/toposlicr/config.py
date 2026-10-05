@@ -141,6 +141,9 @@ class LabelsConfig:
     font: str = "DejaVu Sans"
     mode: str = "engrave_fill"          # "engrave_fill" | "score"
     cap_height_mm: float = 4.0
+    min_cap_height_mm: float = 2.5      # a cramped label may shrink to this, not below
+    search_radius_mm: float = 60.0      # how far from its feature a label may sit
+    curved: bool = True                 # let names flow along a curving open band
     append_elevation: bool = True
     icon_size_mm: float = 5.0           # engraved icon-glyph size (fictional maps)
 

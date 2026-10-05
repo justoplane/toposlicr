@@ -255,7 +255,6 @@ function initMap() {
     setBboxFromLatLngs(origin, e.latlng);
     origin = null; drawing = false; map.dragging.enable();
     $("map").style.cursor = "";
-    scheduleScale();
   });
 }
 
@@ -279,40 +278,17 @@ function drawRect(fit) {
   if (fit) map.fitBounds(b, { padding: [20, 20] });
 }
 
-// --- live scale estimate ---------------------------------------------------
-let scaleTimer = null;
-function scheduleScale() { clearTimeout(scaleTimer); scaleTimer = setTimeout(liveScale, 350); }
-
-async function liveScale() {
-  let cfg;
-  try { cfg = readConfig(); } catch { return; }
-  try {
-    const r = await fetch("/api/scale", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ config: cfg }),
-    });
-    const d = await r.json();
-    if (!r.ok) { $("scale").innerHTML = `<div class="err">${d.detail || "invalid config"}</div>`; return; }
-    const kv = (label, value) => `<div class="kv"><b>${value}</b><span>${label}</span></div>`;
-    $("scale").innerHTML =
-      kv("scale", d.scale_label) +
-      kv("interval", d.interval_m == null ? "from terrain" : d.interval_m + " m") +
-      kv("exaggeration", d.exaggeration == null ? "from terrain" : d.exaggeration + "×") +
-      kv("layers", d.layer_count ?? "from terrain") +
-      kv("real extent", d.extent_km.join(" × ") + " km") +
-      kv("model size", d.model_size_mm.join(" × ") + " mm");
-    if (d.warnings && d.warnings.length)
-      $("scale").innerHTML += `<div class="warnbox" style="grid-column:1/-1">${d.warnings.map(esc).join("<br>")}</div>`;
-  } catch (e) { /* transient */ }
-}
-
 // --- run + progress streaming ---------------------------------------------
+const STAGES = 6;   // the pipeline logs "[k/6] …" at each stage boundary
+
 async function run() {
   $("run").disabled = true;
   setStatus("starting…", "running");
-  $("progresscard").classList.remove("hidden");
-  $("resultscard").classList.add("hidden");
   $("log").textContent = "";
+  $("warnings").innerHTML = "";
+  setProgress(0, "starting…");
+  setResultTabs(false);
+  showTab("loading");
 
   let body;
   try {
@@ -344,18 +320,38 @@ function appendLog(line) {
   const el = $("log");
   el.textContent += line + "\n";
   el.scrollTop = el.scrollHeight;
+  $("progress-summary").textContent = line;
+  const m = /^\[(\d+)\/(\d+)\]\s*(.*)$/.exec(line);
+  if (m) setProgress((parseInt(m[1], 10) - 1) / parseInt(m[2], 10), m[3].replace(/\s*…$/, ""));
+  else if (/^done/.test(line)) setProgress(1, "done");
+}
+
+function setProgress(frac, text) {
+  $("bar-fill").style.width = Math.round(100 * Math.max(0, Math.min(1, frac))) + "%";
+  $("bar-fill").classList.remove("error");
+  if (text != null) $("bar-stage").textContent = text;
 }
 
 function fail(err) {
   setStatus("error", "error");
   appendLog("✖ " + err);
+  $("progress-summary").textContent = "✖ " + err;
+  $("bar-stage").textContent = "✖ " + err;
+  $("bar-fill").classList.add("error");
+  $("progresscard").open = true;
   $("run").disabled = false;
 }
 
 function finish(result) {
   setStatus("done", "done");
   $("run").disabled = false;
+  setProgress(1, "done");
   renderResults(result);
+}
+
+function setResultTabs(enabled) {
+  document.querySelectorAll('.rtab[data-tab="stack"], .rtab[data-tab="boards"], .rtab[data-tab="downloads"]')
+    .forEach((t) => { t.disabled = !enabled; });
 }
 
 // --- results ---------------------------------------------------------------
@@ -363,27 +359,20 @@ let lastResult = null;
 
 function renderResults(r) {
   lastResult = r;
-  $("resultscard").classList.remove("hidden");
   const s = r.scale;
-  const kv = (label, v) => `<div class="kv"><b>${v}</b><span>${label}</span></div>`;
-  $("summary").innerHTML =
-    kv("scale", s.scale_label ?? s.label) +
-    kv("layers", s.layer_count) +
-    kv("interval", s.interval_m + " m") +
-    kv("exaggeration", s.exaggeration + "×") +
-    kv("parts", r.total_parts) +
-    kv("boards", r.total_boards) +
-    kv("model", s.model_width_mm + "×" + s.model_height_mm + " mm");
+
+  // Warnings live with the log in the collapsed Progress card.
+  const nWarn = (r.warnings || []).length;
+  $("warnings").innerHTML = nWarn
+    ? `<div class="warnbox"><b>${nWarn} warning(s)</b><ul>${
+        r.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>` : "";
+  $("progress-summary").innerHTML = `done · ${s.layer_count} layers · ${r.total_boards} boards` +
+    (nWarn ? ` · <span class="warncount">${nWarn} warning(s)</span>` : "");
 
   const dl = [];
   if (r.guide_url) dl.push(`<a href="${r.guide_url}" target="_blank">📄 assembly guide</a>`);
   if (r.zip_url) dl.push(`<a href="${r.zip_url}" download>⬇ download all (zip)</a>`);
   if (r.features_csv_url) dl.push(`<a href="${r.features_csv_url}" download>features.csv</a>`);
-  $("warnings").innerHTML =
-    (dl.length ? `<div class="downloads">${dl.join("")}</div>` : "") +
-    (r.warnings && r.warnings.length
-      ? `<details class="warnbox"><summary>${r.warnings.length} warning(s)</summary><ul>${
-          r.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></details>` : "");
 
   const thumb = (row, label, url, sub) =>
     `<button class="thumb" data-url="${url}"><b>${label}</b>${sub ? "<br>" + sub : ""}</button>`;
@@ -408,16 +397,19 @@ function renderResults(r) {
     link(b.url, `${b.material} #${b.index}`)).join("");
 
   // Stack tab (the main view).
+  setResultTabs(true);
   showTab("stack");
   if (r.stack_url) loadStack(r.stack_url, r);
   else $("stk-stage").innerHTML = '<p class="muted">This run has no stack data.</p>';
 }
 
+// One tab row for the main card: map | (loading) | stack | boards | downloads.
 function showTab(name) {
   document.querySelectorAll(".rtab").forEach((t) =>
     t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".rpane").forEach((p) =>
     p.classList.toggle("hidden", p.id !== "tab-" + name));
+  if (name === "map" && map) setTimeout(() => map.invalidateSize(), 0);
   if (name === "boards" && !$("stage").querySelector("svg")) {
     const first = document.querySelector("#tab-boards .thumb");
     if (first) showSvg(first);
@@ -542,7 +534,7 @@ function buildStackSvg() {
       const spec = STK_OPS[op];
       if (!spec || !dd) continue;
       const color = safeColor(d.colors[spec[1]] || "#000");
-      const attrs = { class: `op op-${op} tg-${spec[0]}`, d: dd };
+      const attrs = { class: `op op-${op} tg-${spec[0]} ${spec[2] === "fill" ? "op-fill" : "op-line"}`, d: dd };
       if (spec[2] === "fill") { attrs.fill = color; attrs.stroke = "none"; }
       else { attrs.fill = "none"; attrs.stroke = color; }
       if (op === "seam") attrs["stroke-dasharray"] = "2 1.5";
@@ -582,10 +574,14 @@ function buildRail() {
     const warn = l.warnings.length
       ? `<span class="warn" title="${esc(l.warnings.join("\n"))}">⚠</span>` : "";
     const panels = l.panels > 1 ? `<span class="chip panels">${l.panels} panels</span>` : "";
+    const seams = l.seam_hidden_pct == null ? "" :
+      `<span class="chip seams ${l.seam_hidden_pct < 80 ? "bad" : l.seam_hidden_pct < 100 ? "meh" : "ok"}" ` +
+      `title="${l.seam_exposed_mm} of ${l.seam_mm} mm of seam exposed on the finished stack">` +
+      `seams ${l.seam_hidden_pct}% hidden</span>`;
     return `<button class="lrow" data-k="${k}" title="click to view this layer's cut file">` +
       `<span class="sw" style="background:${stkShade(k, n)}"></span>` +
       `<span><b>L${k}</b> <span class="elev">≥ ${l.threshold_m} m</span></span>${warn || "<span></span>"}` +
-      `<span class="meta"><span class="chip" title="${esc(l.material)}">${esc(l.material)}</span>${panels}</span>` +
+      `<span class="meta"><span class="chip" title="${esc(l.material)}">${esc(l.material)}</span>${panels}${seams}</span>` +
       `</button>`;
   }).join("");
   rail.querySelectorAll(".lrow").forEach((row) => {
@@ -804,7 +800,7 @@ function wireStackStage() {
       applyToggles();
     }));
   document.querySelectorAll(".rtab").forEach((t) =>
-    t.addEventListener("click", () => showTab(t.dataset.tab)));
+    t.addEventListener("click", () => { if (!t.disabled) showTab(t.dataset.tab); }));
   loadToggles();
 }
 
@@ -819,8 +815,11 @@ function exportStackPng() {
   clone.querySelectorAll("path.cut").forEach((p) => {
     p.setAttribute("stroke", "rgba(0,0,0,.25)"); p.setAttribute("stroke-width", "0.12");
   });
-  clone.querySelectorAll("path.op").forEach((p) => p.setAttribute("stroke-width", "0.3"));
-  clone.querySelectorAll("path.op-engrave_fill, path.op-icon").forEach((p) => p.setAttribute("stroke", "none"));
+  clone.querySelectorAll("path.op-line").forEach((p) => p.setAttribute("stroke-width", "0.3"));
+  clone.querySelectorAll("path.op-fill").forEach((p) => {
+    p.setAttribute("stroke", "rgba(255,255,255,0.75)"); p.setAttribute("stroke-width", "0.45");
+    p.setAttribute("paint-order", "stroke"); p.setAttribute("stroke-linejoin", "round");
+  });
   const ghost = clone.querySelector("path.ghost");
   ghost.setAttribute("fill", "none"); ghost.setAttribute("stroke", "#2d6cdf");
   ghost.setAttribute("stroke-width", "0.5"); ghost.setAttribute("stroke-dasharray", "2 1.5");
@@ -933,9 +932,6 @@ function setMode(m) {
     t.classList.toggle("active", t.dataset.mode === m));
   document.querySelectorAll(".mode-real").forEach((e) => e.classList.toggle("hidden", m !== "real"));
   document.querySelectorAll(".mode-fictional").forEach((e) => e.classList.toggle("hidden", m !== "fictional"));
-  // Live scale only applies to real-world (fictional needs the bundle).
-  $("scalecard").classList.toggle("hidden", m === "fictional");
-  if (m === "real") liveScale();
 }
 
 // Relabel the value field + pick a sensible default when the scale driver changes.
@@ -949,7 +945,6 @@ function syncDriverField() {
   $("driver_value_label").childNodes[0].nodeValue = m.label + " ";
   $("driver_value").step = m.step;
   $("driver_value").value = m.def;
-  scheduleScale();
 }
 
 function updateSourceFields() {
@@ -963,9 +958,7 @@ function updateSourceFields() {
 // --- wiring ----------------------------------------------------------------
 function wire() {
   ["west", "south", "east", "north"].forEach((id) =>
-    $(id).addEventListener("change", () => { drawRect(true); scheduleScale(); }));
-  ["model_width_mm", "ply_thickness_mm", "driver", "driver_value", "dem"].forEach((id) =>
-    $(id).addEventListener("input", scheduleScale));
+    $(id).addEventListener("change", () => drawRect(true)));
   $("driver").addEventListener("change", syncDriverField);
   syncDriverField();
   $("run").addEventListener("click", run);
@@ -991,6 +984,5 @@ function wire() {
   } catch (e) {
     $("map").innerHTML = '<p class="muted" style="padding:14px">Map failed to load — use the numeric fields.</p>';
   }
-  liveScale();
 }
 document.addEventListener("DOMContentLoaded", wire);

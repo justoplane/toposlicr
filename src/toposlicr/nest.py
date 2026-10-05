@@ -2,7 +2,8 @@
 
 Parts are grouped by material — each material nests independently onto its own
 board sequence — then bin-packed onto usable-bed-sized sheets with a kerf-aware
-gap between pieces. This is the deterministic v1 (rectangular bin packing on part
+gap between pieces, rotating a part 90° when that packs better (or is the only
+way it fits). This is the deterministic v1 (rectangular bin packing on part
 bounding boxes); true irregular no-fit-polygon nesting is a later upgrade behind
 the same ``nest_parts`` interface.
 
@@ -86,7 +87,9 @@ def _guard_fits_bed(parts: list[Part], usable_w: float, usable_h: float,
                     material: str) -> None:
     for part in parts:
         w, h = part.size
-        if w > usable_w + 1e-9 or h > usable_h + 1e-9:
+        fits = (w <= usable_w + 1e-9 and h <= usable_h + 1e-9) or \
+               (w <= usable_h + 1e-9 and h <= usable_w + 1e-9)
+        if not fits:
             raise ValueError(
                 f"part {part.part_id} ({w:.1f}×{h:.1f} mm) exceeds the usable bed "
                 f"({usable_w:.1f}×{usable_h:.1f} mm) for material '{material}'. "
@@ -98,7 +101,7 @@ def _guard_fits_bed(parts: list[Part], usable_w: float, usable_h: float,
 def _nest_group(parts: list[Part], material: str, usable_w: float,
                 usable_h: float, spacing: float) -> list[Board]:
     packer = newPacker(mode=PackingMode.Offline, bin_algo=PackingBin.BFF,
-                       pack_algo=MaxRectsBssf, rotation=False)
+                       pack_algo=MaxRectsBssf, rotation=True)
     # Each rect is inflated by `spacing` for the inter-part gap, so the bin is
     # enlarged by the same amount — otherwise a part sized exactly to the usable
     # bed would fail to place. The outer bed margin absorbs the extra spacing,
@@ -114,14 +117,23 @@ def _nest_group(parts: list[Part], material: str, usable_w: float,
 
     placed_ids = set()
     board_parts: dict[int, list[Part]] = defaultdict(list)
-    for bin_idx, x, y, _w, _h, rid in packer.rect_list():
+    from shapely.affinity import rotate as _rotate
+
+    from .parts import Placement
+
+    for bin_idx, x, y, rw, rh, rid in packer.rect_list():
         part = by_index[rid]
-        minx, miny, _, _ = part.outline.bounds
+        w, h = part.size
+        # rectpack reports the placed rect's w/h; swapped (for a non-square
+        # part) means it rotated the piece 90°.
+        rotated = abs(w - h) > 1e-9 and abs(rw - (h + spacing)) < 1e-6 \
+            and abs(rh - (w + spacing)) < 1e-6
+        geom = _rotate(part.outline, 90, origin="centroid") if rotated else part.outline
+        minx, miny, _, _ = geom.bounds
         # Land the part's bbox-min at the rect corner; the gap sits on the
         # opposite sides, guaranteeing clearance to the next piece.
-        from .parts import Placement
-
-        part.placement = Placement(board_index=bin_idx, tx=x - minx, ty=y - miny)
+        part.placement = Placement(board_index=bin_idx, tx=x - minx, ty=y - miny,
+                                   rotation_deg=90.0 if rotated else 0.0)
         board_parts[bin_idx].append(part)
         placed_ids.add(rid)
 
