@@ -154,3 +154,51 @@ def test_end_to_end_synthetic_produces_acrylic():
     assert all(p.material == water_material(cfg.materials) for p in acrylics)
     # The happy-path lake is not on the base layer, so no shelf warning fires.
     assert not any("shelf" in w for w in warnings)
+
+
+def test_lake_crossing_layer_edge_is_clipped_flush():
+    """A lake running off the part (map edge / contour) never overhangs it."""
+    ply = Part(part_id="L02-P0", kind="ply", material="birch_3mm",
+               outline=MultiPolygon([_square(50, 50, 40)]), layer_index=2)  # x,y 10..90
+    lake = _square(90, 50, 15)            # x 75..105: half of it is off the part
+    model = _FakeModel({1: MultiPolygon([_square(50, 50, 60)])})
+    sym = _fake_symbology({2: [lake]})
+    out, warnings = apply_acrylic([ply], model, sym, _cfg(mode="inset"))
+
+    ac = next(p for p in out if p.kind == "acrylic")
+    minx, miny, maxx, maxy = ac.outline.bounds
+    assert maxx <= 90 + 1e-6                          # flush with the part's edge
+    assert minx < 75                                  # press-fit offset on the inner edge
+    # The acrylic fills the notch it was cut from (plus the inner-edge offset).
+    hole = 80 * 80 - ply.area
+    assert hole == pytest.approx(15 * 30, rel=0.01)
+    assert hole < ac.area < hole * 1.05
+    assert not warnings
+
+
+def test_lake_off_every_part_warns():
+    ply = Part(part_id="L02-P0", kind="ply", material="birch_3mm",
+               outline=MultiPolygon([_square(50, 50, 40)]), layer_index=2)
+    model = _FakeModel({1: MultiPolygon([_square(50, 50, 60)])})
+    sym = _fake_symbology({2: [_square(200, 200, 10)]})
+    out, warnings = apply_acrylic([ply], model, sym, _cfg(mode="inset"))
+    assert not [p for p in out if p.kind == "acrylic"]
+    assert any("no ply part found" in w for w in warnings)
+
+
+def test_thin_lake_sliver_is_skipped():
+    """A lake clipped to a sliver at the map edge is too thin to cut as acrylic."""
+    ply = Part(part_id="L02-P0", kind="ply", material="birch_3mm",
+               outline=MultiPolygon([_square(50, 50, 40)]), layer_index=2)  # x,y 10..90
+    sliver = Polygon([(60, 89), (66, 89), (66, 120), (60, 120)])  # 6 × 1 mm on the part
+    wide = _square(40, 50, 5)
+    model = _FakeModel({1: MultiPolygon([_square(50, 50, 60)])})
+    sym = _fake_symbology({2: [sliver, wide]})
+    out, warnings = apply_acrylic([ply], model, sym, _cfg(mode="inset"))
+
+    acrylics = [p for p in out if p.kind == "acrylic"]
+    assert len(acrylics) == 1                          # only the wide lake
+    assert acrylics[0].outline.bounds[3] < 60
+    assert _interiors(ply.outline) == 1                # and only it was cut out
+    assert ply.area == pytest.approx(80 * 80 - 10 * 10, rel=0.01)
+    assert not warnings

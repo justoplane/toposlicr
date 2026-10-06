@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 
 from .config import Config
 from .layers import LayerModel
@@ -27,6 +28,10 @@ INTERFERENCE_MM = 0.05
 
 # Lakes smaller than this (model mm²) aren't worth an acrylic insert.
 _MIN_LAKE_AREA_MM2 = 1.0
+
+# Nor are pieces narrower than this (mm) — e.g. the sliver left when a lake that
+# is mostly off the map is clipped to it: too thin to cut, handle or press in.
+_MIN_LAKE_WIDTH_MM = 3.0
 
 
 def press_fit_offset(cfg: Config) -> float:
@@ -55,7 +60,20 @@ def apply_acrylic(parts: list[Part], model: LayerModel, symbology: SymbologyResu
 
     for k, sym in symbology.per_layer.items():
         acrylic_n = 0
+        # The wood this layer is made of. A lake can run off the map edge or
+        # past the layer's contour; only the part over wood becomes a hole, so
+        # only that part may become acrylic.
+        wood = unary_union([p.outline for p in result
+                            if p.kind == "ply" and p.layer_index == k])
         for lake in sym.lake_polys:
+            if lake.is_empty or lake.area < _MIN_LAKE_AREA_MM2:
+                continue
+            lake = _mp(lake.intersection(wood))
+            if lake.is_empty:
+                warnings.append(
+                    f"no ply part found on layer {k} to host a lake inset")
+                continue
+            lake = _drop_thin(lake, _MIN_LAKE_WIDTH_MM)
             if lake.is_empty or lake.area < _MIN_LAKE_AREA_MM2:
                 continue
 
@@ -100,8 +118,10 @@ def apply_acrylic(parts: list[Part], model: LayerModel, symbology: SymbologyResu
                     f"no ply part found on layer {k} to host a lake inset")
                 continue
 
-            # Emit the matching acrylic part (lake grown by the press-fit offset).
-            acrylic_outline = _mp(lake.buffer(offset))
+            # Emit the matching acrylic part: the lake grown by the press-fit
+            # offset, clipped back to the layer so edges on the map border or a
+            # contour sit flush instead of overhanging.
+            acrylic_outline = _mp(lake.buffer(offset).intersection(wood))
             if acrylic_outline.is_empty:
                 continue
             result.append(Part(
@@ -114,6 +134,15 @@ def apply_acrylic(parts: list[Part], model: LayerModel, symbology: SymbologyResu
             acrylic_n += 1
 
     return result, warnings
+
+
+def _drop_thin(geom: MultiPolygon, min_width: float) -> MultiPolygon:
+    """Drop the pieces narrower than ``min_width`` everywhere.
+
+    A piece survives if shrinking it by half the width leaves anything, i.e. a
+    ``min_width`` disc fits inside it somewhere.
+    """
+    return MultiPolygon([p for p in geom.geoms if not p.buffer(-min_width / 2).is_empty])
 
 
 def _mp(geom: BaseGeometry) -> MultiPolygon:
