@@ -209,6 +209,16 @@ pre#log { background: #0f1420; color: #d7e0ee; padding: 12px; border-radius: 8px
 .stack-stage .hint { position: absolute; left: 10px; bottom: 8px; font-size: 11px;
   color: var(--muted); background: rgba(255,255,255,.85); padding: 2px 6px; border-radius: 4px;
   pointer-events: none; }
+/* 2D | 3D switch + the 3D stage */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.segbtn { background: #fff; border: 0; padding: 3px 10px; font-size: 12px; cursor: pointer;
+  color: var(--muted); }
+.segbtn + .segbtn { border-left: 1px solid var(--line); }
+.segbtn.active { background: var(--accent); color: #fff; }
+.stack-toolbar input[type=range] { width: 90px; padding: 0; vertical-align: middle; }
+.stack3d { background: #f4f6fa; display: block; }
+.stack3d canvas { width: 100%; height: 100%; display: block; }
+.stack3d .err { padding: 14px; }
 .isolate-bar { display: flex; align-items: center; gap: 10px; font-size: 12px; margin-bottom: 8px; }
 .isolate-bar .chip { font-size: 10px; padding: 1px 5px; border-radius: 4px; background: #f1ebe3;
   color: #7a5a2c; }

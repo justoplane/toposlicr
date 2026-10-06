@@ -447,9 +447,12 @@ const STK = {
   data: null, result: null, height: 0, n: 0,
   svg: null, view: null, groups: [], ghost: null, hi: null,
   zoom: { s: 1, tx: 0, ty: 0 }, playTimer: null, isolated: null,
+  // 3D view (stack3d.js, loaded on first use): module, viewer, data it holds
+  mode: "2d", v3mod: null, v3: null, v3load: null, v3data: null,
   toggles: { water: true, trails: true, names: true, seams: false, ghost: true, shadows: true },
 };
 const STK_KEY = "toposlicr.stack.toggles";
+const STK_VIEW_KEY = "toposlicr.stack.view";
 const SHADOW_VERTEX_BUDGET = 400000;   // above this the drop-shadow filter is too slow
 // op → toggle group + which color key paints it
 const STK_OPS = {
@@ -459,6 +462,7 @@ const STK_OPS = {
   engrave_fill: ["names", "engrave_fill", "fill"],
   icon: ["names", "engrave_fill", "fill"],
   seam: ["seams", "seam", "line"],
+  inset: ["water", "score_hydro", "fill"],
 };
 
 function stkShade(k, n) {
@@ -501,6 +505,7 @@ async function loadStack(url, result) {
   buildRail();
   applyHeight();
   resetZoom();
+  setView(STK.mode);
 }
 
 function buildStackSvg() {
@@ -538,6 +543,7 @@ function buildStackSvg() {
       if (spec[2] === "fill") { attrs.fill = color; attrs.stroke = "none"; }
       else { attrs.fill = "none"; attrs.stroke = color; }
       if (op === "seam") attrs["stroke-dasharray"] = "2 1.5";
+      if (op === "inset") attrs["fill-opacity"] = "0.35";
       g.appendChild(el("path", attrs));
     }
     view.appendChild(g);
@@ -602,6 +608,7 @@ function applyHeight() {
   if (!STK.data) return;
   const h = STK.height, d = STK.data;
   STK.groups.forEach((g, k) => { g.style.display = k < h ? "" : "none"; });
+  if (STK.v3) STK.v3.setHeight(h);
   $("stk-rail").querySelectorAll(".lrow").forEach((row) => {
     row.classList.toggle("off", parseInt(row.dataset.k, 10) >= h);
   });
@@ -620,11 +627,13 @@ function setHover(k, fromRail) {
   if (!STK.data) return;
   const d = k !== null && k < STK.height ? STK.data.layers[k].cut : "";
   STK.hi.setAttribute("d", fromRail ? (k !== null ? STK.data.layers[k].cut : "") : d);
+  if (STK.v3) STK.v3.setHover(k);
   $("stk-rail").querySelectorAll(".lrow").forEach((row) =>
     row.classList.toggle("hover", parseInt(row.dataset.k, 10) === k));
 }
 
 function applyToggles() {
+  if (STK.v3) STK.v3.setToggles(STK.toggles);
   if (!STK.svg) return;
   for (const t of ["water", "trails", "names", "seams"]) {
     STK.svg.querySelectorAll(`.tg-${t}`).forEach((p) => {
@@ -648,9 +657,21 @@ function renderStackLegend() {
   const d = STK.data, m = d.model, n = STK.n;
   const stops = d.layers.map((_, k) =>
     `${stkShade(k, n)} ${(100 * k / n).toFixed(1)}% ${(100 * (k + 1) / n).toFixed(1)}%`);
-  const items = [legendItem(
-    `<span class="swatch bands" style="background:linear-gradient(90deg,${stops.join(",")})"></span>`,
-    "Layers", `${n} × ${m.ply_thickness_mm} mm ply; light = base (${m.base_elev_m} m), dark = summit; one band = ${m.interval_m} m`)];
+  const look = STK.mode === "3d" && STK.v3mod ? STK.v3mod.materialLook : null;
+  const hex = (c) => "#" + c.toString(16).padStart(6, "0");
+  const items = [];
+  if (look) {
+    // 3D: slabs are colored by material, so the legend lists the materials.
+    const counts = new Map();
+    d.layers.forEach((l) => counts.set(l.material, (counts.get(l.material) || 0) + 1));
+    for (const [mat, c] of counts)
+      items.push(legendItem(swatch("fill", hex(look(mat).color)), mat,
+        `${c} layer${c > 1 ? "s" : ""} × ${m.ply_thickness_mm} mm; one layer = ${m.interval_m} m`));
+  } else {
+    items.push(legendItem(
+      `<span class="swatch bands" style="background:linear-gradient(90deg,${stops.join(",")})"></span>`,
+      "Layers", `${n} × ${m.ply_thickness_mm} mm ply; light = base (${m.base_elev_m} m), dark = summit; one band = ${m.interval_m} m`));
+  }
   const present = new Set();
   d.layers.forEach((l) => Object.keys(l.ops || {}).forEach((op) => present.add(op)));
   const rows = [
@@ -660,16 +681,19 @@ function renderStackLegend() {
     ["icon", "Icon", "engraved feature icon"],
     ["leader", "Leader", "links a name to its feature"],
     ["seam", "Panel seam", "where an oversized layer is split (not cut)"],
+    ["inset", "Acrylic inset", "lake set into the layer as a press-fit acrylic insert"],
   ];
   for (const [op, label, desc] of rows) {
     const spec = STK_OPS[op];
     if (!present.has(op) || !STK.toggles[spec[0]]) continue;
     const kind = spec[2] === "fill" ? "fill" : (op === "score_trail" || op === "seam" ? "dash" : "line");
-    items.push(legendItem(swatch(kind, d.colors[spec[1]]), label, desc));
+    const color = op === "inset" && look
+      ? hex(look(m.water_material || "blue_acrylic").color) : d.colors[spec[1]];
+    items.push(legendItem(swatch(kind, color), label, desc));
   }
   if (STK.toggles.ghost && STK.height < n)
     items.push(legendItem(swatch("dash", "#2d6cdf"), "Next layer", "where the next layer sits on the stack"));
-  el.innerHTML = `<span class="legend-title">Legend · elevation stack</span>${items.join("")}`;
+  el.innerHTML = `<span class="legend-title">Legend · ${look ? "3D stack" : "elevation stack"}</span>${items.join("")}`;
   el.classList.remove("hidden");
 }
 
@@ -678,6 +702,7 @@ async function isolateLayer(k) {
   const r = STK.result;
   if (!r || !r.layers[k]) return;
   stopPlay();
+  if (STK.mode === "3d") setView("2d");      // the cut file is a 2D view
   STK.isolated = k;
   const l = STK.data.layers[k];
   const stage = $("stk-stage");
@@ -777,13 +802,21 @@ function wireStackStage() {
   });
   window.addEventListener("mouseup", () => { drag = null; stage.classList.remove("dragging"); });
   stage.addEventListener("dblclick", () => { if (STK.isolated === null) resetZoom(); });
-  stage.addEventListener("keydown", (e) => {
+  const keys = (e) => {
     if (!STK.data) return;
     if (e.key === "ArrowUp" || e.key === "ArrowRight") { e.preventDefault(); stopPlay(); setHeight(STK.height + 1); }
     else if (e.key === "ArrowDown" || e.key === "ArrowLeft") { e.preventDefault(); stopPlay(); setHeight(STK.height - 1); }
     else if (e.key === " ") { e.preventDefault(); togglePlay(); }
     else if (e.key === "Escape" && STK.isolated !== null) showStackStage();
-  });
+  };
+  stage.addEventListener("keydown", keys);
+  const stage3d = $("stk-stage3d");
+  stage3d.addEventListener("keydown", keys);
+  stage3d.addEventListener("dblclick", () => STK.v3 && STK.v3.fit());
+  document.querySelectorAll("#tab-stack .segbtn").forEach((b) =>
+    b.addEventListener("click", () => setView(b.dataset.view)));
+  $("stk-explode").addEventListener("input", () => STK.v3 && STK.v3.setExplode(+$("stk-explode").value));
+  $("stk-stretch").addEventListener("input", () => STK.v3 && STK.v3.setStretch(+$("stk-stretch").value));
 
   $("stk-slider").addEventListener("input", () => {
     stopPlay(); setHeight(parseInt($("stk-slider").value, 10), true);
@@ -791,7 +824,9 @@ function wireStackStage() {
   $("stk-up").addEventListener("click", () => { stopPlay(); setHeight(STK.height + 1); });
   $("stk-down").addEventListener("click", () => { stopPlay(); setHeight(STK.height - 1); });
   $("stk-play").addEventListener("click", togglePlay);
-  $("stk-reset").addEventListener("click", resetZoom);
+  $("stk-reset").addEventListener("click", () => {
+    if (STK.mode === "3d") { if (STK.v3) STK.v3.fit(); } else resetZoom();
+  });
   $("stk-png").addEventListener("click", exportStackPng);
   document.querySelectorAll("#tab-stack [data-toggle]").forEach((cb) =>
     cb.addEventListener("change", () => {
@@ -802,10 +837,63 @@ function wireStackStage() {
   document.querySelectorAll(".rtab").forEach((t) =>
     t.addEventListener("click", () => { if (!t.disabled) showTab(t.dataset.tab); }));
   loadToggles();
+  try { STK.mode = localStorage.getItem(STK_VIEW_KEY) === "3d" ? "3d" : "2d"; } catch (e) { /* ignore */ }
+  setView(STK.mode);
+}
+
+// -- 2D | 3D: both views read the same STK state; 3D loads three.js on first use
+function setView(mode) {
+  STK.mode = mode === "3d" ? "3d" : "2d";
+  try { localStorage.setItem(STK_VIEW_KEY, STK.mode); } catch (e) { /* ignore */ }
+  const is3d = STK.mode === "3d";
+  document.querySelectorAll("#tab-stack .segbtn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.view === STK.mode));
+  document.querySelectorAll("#tab-stack .only3d").forEach((e) => e.classList.toggle("hidden", !is3d));
+  $("stk-stage").classList.toggle("hidden", is3d);
+  $("stk-stage3d").classList.toggle("hidden", !is3d);
+  $("stk-reset").title = is3d ? "reset the camera (double-click the view)" : "reset zoom (double-click the map)";
+  if (is3d) {
+    if (STK.isolated !== null) showStackStage();
+    if (STK.data) ensure3d();
+  }
+  renderStackLegend();
+}
+
+async function ensure3d() {
+  const stage = $("stk-stage3d");
+  try {
+    if (!STK.v3) {
+      STK.v3load = STK.v3load || import("/static/stack3d.js");
+      STK.v3mod = await STK.v3load;
+      if (!STK.v3) STK.v3 = STK.v3mod.createStack3D(stage, { onHover: (k) => setHover(k) });
+    }
+  } catch (e) {
+    STK.v3load = null;
+    if (!stage.querySelector(".err"))
+      stage.insertAdjacentHTML("afterbegin",
+        '<p class="err">3D view unavailable — could not load three.js (offline?)</p>');
+    return;
+  }
+  stage.querySelector(".err")?.remove();
+  STK.v3.setToggles(STK.toggles);
+  STK.v3.setHeight(STK.height);
+  STK.v3.setExplode(+$("stk-explode").value);
+  STK.v3.setStretch(+$("stk-stretch").value);
+  if (STK.v3data !== STK.data) { STK.v3data = STK.data; STK.v3.setData(STK.data); }
+  renderStackLegend();
 }
 
 // -- PNG export of the whole map at the current stack height (ignores zoom)
 function exportStackPng() {
+  const name = `${val("project_name") || "map"}_stack${STK.mode === "3d" ? "3d" : ""}_${STK.height}of${STK.n}.png`;
+  if (STK.mode === "3d") {
+    if (!STK.v3) return;
+    const a = document.createElement("a");
+    a.href = STK.v3.snapshot();
+    a.download = name;
+    a.click();
+    return;
+  }
   if (!STK.svg || STK.isolated !== null) return;
   const m = STK.data.model;
   const clone = STK.svg.cloneNode(true);
@@ -846,7 +934,7 @@ function exportStackPng() {
     canvas.toBlob((png) => {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(png);
-      a.download = `${val("project_name") || "map"}_stack_${STK.height}of${STK.n}.png`;
+      a.download = name;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     }, "image/png");

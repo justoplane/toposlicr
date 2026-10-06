@@ -6,6 +6,10 @@ size) together with the per-layer symbology grouped by laser operation. The
 viewer draws layers on top of each other in order, so the payload carries no
 registration scores — the layer above covers them — and instead the front-end
 derives the "next layer goes here" ghost from the layer above's cut outline.
+
+``solid`` is the cut outline minus any acrylic lake holes (``None`` when the
+layer has none) — what the 3D viewer extrudes so the insets sit in real holes.
+Polygon path data is consistently wound (see ``_poly_d``).
 """
 
 from __future__ import annotations
@@ -13,11 +17,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from shapely import get_num_coordinates
+from shapely import get_num_coordinates, orient_polygons, unary_union
 
 from ..config import Config
 from ..panelize import seam_visibility
-from ..parts import material_for_layer
+from ..parts import material_for_layer, water_material
 from ..pipeline import PipelineResult
 from ..render import layer_seams
 from ..svg import line_to_path_d, polygon_to_path_d
@@ -50,6 +54,14 @@ def build_stack(result: PipelineResult, cfg: Config) -> dict[str, Any]:
         seams = layer_seams(parts, k)
         if seams is not None:
             _put(ops, "seam", [seams], height)
+        # Acrylic lake insets: the lake holes are cut into the parts, not the
+        # layer model, so the 3D viewer gets the holed outline separately.
+        insets = unary_union([p.outline for p in parts
+                              if getattr(p, "kind", None) == "acrylic" and p.layer_index == k])
+        solid = None
+        if not insets.is_empty:
+            _put(ops, "inset", [insets], height)
+            solid = _poly_d(layer.geometry.difference(insets), height)
         panels = sum(1 for p in parts
                      if getattr(p, "kind", None) == "ply" and p.layer_index == k)
         seam_total, seam_exposed = seam_visibility(parts, model, k) if parts else (0.0, 0.0)
@@ -65,7 +77,8 @@ def build_stack(result: PipelineResult, cfg: Config) -> dict[str, Any]:
             "area_mm2": round(layer.geometry.area),
             "vertices": int(get_num_coordinates(layer.geometry)),
             "warnings": list(layer.warnings) + layer_warnings.get(k, []),
-            "cut": polygon_to_path_d(layer.geometry, height),
+            "cut": _poly_d(layer.geometry, height),
+            "solid": solid,
             "ops": ops,
         })
 
@@ -80,6 +93,7 @@ def build_stack(result: PipelineResult, cfg: Config) -> dict[str, Any]:
             "max_elev_m": round(model.max_elev_m, 1),
             "layer_count": model.layer_count,
             "fictional": bool(model.flat),
+            "water_material": water_material(cfg.materials),
         },
         "colors": dict(cfg.machine.colors),
         "layers": layers,
@@ -91,11 +105,20 @@ def _put(ops: dict[str, Any], op: str, geoms, height: float) -> None:
     for g in geoms:
         if g is None or g.is_empty:
             continue
-        d = line_to_path_d(g, height) if op in _LINE_OPS else polygon_to_path_d(g, height)
+        d = line_to_path_d(g, height) if op in _LINE_OPS else _poly_d(g, height)
         if not d and op in _LINE_OPS:      # lake outlines may arrive as polygons
             d = polygon_to_path_d(g, height)
         if d:
             ops[op] = ops.get(op, "") + d
+
+
+def _poly_d(geom, height: float) -> str:
+    """Polygon path data with every exterior wound one way and every hole the other.
+
+    The path lists each exterior followed by its holes; consistent winding lets
+    the 3D viewer tell a hole from the next polygon without containment tests.
+    """
+    return polygon_to_path_d(orient_polygons(geom), height)
 
 
 _LAYER_RE = re.compile(r"\bon layer (\d+)\b")

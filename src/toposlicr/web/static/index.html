@@ -6,6 +6,12 @@
   <title>toposlicr</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="/static/style.css">
+  <!-- three.js for the 3D stack view; only fetched when 3D is first opened. -->
+  <script type="importmap">
+    { "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+  </script>
 </head>
 <body>
   <header>
@@ -212,6 +218,9 @@
             </aside>
             <div class="stagecol">
               <div class="stack-toolbar">
+                <span class="seg" role="group" aria-label="stack view">
+                  <button class="segbtn active" data-view="2d">2D</button><button class="segbtn" data-view="3d">3D</button>
+                </span>
                 <label class="inline"><input type="checkbox" data-toggle="water" checked> water</label>
                 <label class="inline"><input type="checkbox" data-toggle="trails" checked> trails</label>
                 <label class="inline"><input type="checkbox" data-toggle="names" checked> names</label>
@@ -219,12 +228,20 @@
                 <label class="inline"><input type="checkbox" data-toggle="ghost" checked> next-layer ghost</label>
                 <label class="inline"><input type="checkbox" data-toggle="shadows" checked> shadows</label>
                 <span class="spacer"></span>
+                <label class="inline only3d hidden" title="spread the layers apart">explode
+                  <input id="stk-explode" type="range" min="0" max="5" step="0.1" value="0"></label>
+                <label class="inline only3d hidden" title="exaggerate layer thickness">z ×
+                  <input id="stk-stretch" type="range" min="1" max="5" step="0.1" value="1"></label>
                 <button id="stk-reset" class="small" title="reset zoom (double-click the map)">fit</button>
                 <button id="stk-png" class="small" title="save the current stack as a PNG">⬇ PNG</button>
               </div>
               <div id="stk-stage" class="stage stack-stage" tabindex="0"
                    aria-label="layer stack; scroll to zoom, drag to pan, arrow keys to change height">
                 <p class="muted">Run the pipeline to build the stack.</p>
+              </div>
+              <div id="stk-stage3d" class="stage stack-stage stack3d hidden" tabindex="0"
+                   aria-label="3D layer stack; drag to orbit, right-drag to pan, scroll to zoom, arrow keys to change height">
+                <div class="hint">drag to orbit · right-drag to pan · scroll to zoom · ↑↓ to step</div>
               </div>
               <div class="stack-height">
                 <button id="stk-down" class="iconbtn" title="remove top layer (↓)">▼</button>

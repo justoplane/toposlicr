@@ -295,3 +295,33 @@ def test_stack_ops_and_layer_warnings(tmp_path):
     assert stack["layers"][1]["warnings"] == ["clipped",
                                               "label 'X' could not be placed on layer 1"]
     assert _warnings_by_layer(["nothing here"]) == {}
+
+
+def test_stack_acrylic_insets(tmp_path):
+    """Acrylic parts become an ``inset`` op and a holed ``solid`` outline."""
+    from types import SimpleNamespace
+
+    from shapely.geometry import MultiPolygon, Polygon
+
+    from toposlicr.config import parse_config
+    from toposlicr.parts import Part
+    from toposlicr.web.stack import build_stack
+
+    cfg = parse_config(CFG)
+    sq = lambda x, y, s: MultiPolygon([Polygon([(x, y), (x + s, y), (x + s, y + s),  # noqa: E731
+                                                (x, y + s)])])
+    layers = [SimpleNamespace(index=0, threshold_m=500.0, geometry=sq(0, 0, 100), warnings=[]),
+              SimpleNamespace(index=1, threshold_m=700.0, geometry=sq(0, 0, 80), warnings=[])]
+    model = SimpleNamespace(layers=layers, model_width_mm=100.0, model_height_mm=100.0,
+                            interval_m=200.0, base_elev_m=500.0, max_elev_m=900.0,
+                            layer_count=2, flat=False,
+                            scale=SimpleNamespace(scale_label=lambda: "1:1000"))
+    parts = [Part("L01-P0", "ply", "birch_3mm", sq(0, 0, 80), layer_index=1),
+             Part("W01-P0", "acrylic", "blue_acrylic_3mm", sq(20, 20, 10), layer_index=1)]
+    result = SimpleNamespace(model=model, parts=parts, symbology=None, warnings=[])
+    stack = build_stack(result, cfg)
+    l0, l1 = stack["layers"]
+    assert l0["solid"] is None and "inset" not in l0["ops"]
+    assert l1["ops"]["inset"].startswith("M")
+    # The solid outline is the cut with the lake hole: two rings instead of one.
+    assert l1["solid"].count("M") == 2 and l1["cut"].count("M") == 1
